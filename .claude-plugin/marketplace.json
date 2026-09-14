@@ -1,0 +1,14 @@
+{
+  "name": "ai-company",
+  "description": "AI 회사 생성기 — 총괄 봇 하나와 기존 폴더 봇들을 부서·직원으로 묶어, 요청 한 번으로 사슬 업무(기획→제작→검증)가 돌게 한다. agentlayer 배관(send·task·훅 보고) 위에서 동작",
+  "owner": { "name": "netwaif", "email": "netwaif@users.noreply.github.com" },
+  "plugins": [
+    {
+      "name": "ai-company",
+      "description": "\"AI 회사 만들어줘\" — 회사 폴더·공동 규칙·직원명부·총괄 절차를 결정적 엔진(companyctl)이 멱등 설치. 직원은 기존 folder-bot 봇 등록 / 새 폴더 신설 / 호출형 세 모드. 수동은 디스코드 포탈(총괄 봇)뿐.",
+      "version": "0.1.0",
+      "source": "./plugins/ai-company",
+      "author": { "name": "netwaif" }
+    }
+  ]
+}
