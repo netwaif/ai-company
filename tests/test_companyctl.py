@@ -172,3 +172,65 @@ def test_init_on_corrupted_roster_dies_cleanly(env, tmp_path):
     assert r.returncode != 0
     assert "손상" in r.stderr
     assert "Traceback" not in r.stderr
+
+
+MS, ME = "<!-- store:ai-company:start -->", "<!-- store:ai-company:end -->"
+
+
+def test_install_creates_templates_blocks_and_session(env, tmp_path):
+    root = _init(env, tmp_path)
+    folder = tmp_path / "collab"
+    folder.mkdir()
+    (folder / "CLAUDE.md").write_text("# collab\n기존 규칙\n")
+    write_bots_json(env, {"collab": {"engine": "claude", "folder": str(folder), "session": "collab-bot"}})
+    write_access(folder, ["1"])
+    run(env, "employee", "add", "--root", str(root), "--dept", "비즈니스운영팀", "--name", "사업운영", "--bot", "collab")
+    r = run(env, "install", "--root", str(root))
+    assert r.returncode == 0, r.stderr
+    for f in ["_templates/task.md", "_templates/업무요청.md", "_templates/log.md", "SESSION.md", "CLAUDE.md"]:
+        assert (root / f).exists(), f
+    cm = (root / "CLAUDE.md").read_text()
+    assert MS in cm and ME in cm and str(root) in cm and "runtime/inbox" in cm and "총괄 절차" in cm
+    em = (folder / "CLAUDE.md").read_text()
+    assert em.startswith("# collab\n기존 규칙\n") and MS in em and "비즈니스운영팀" in em and "사업운영" in em
+
+
+def test_install_idempotent_and_never_touches_existing_session(env, tmp_path):
+    root = _init(env, tmp_path)
+    (root / "SESSION.md").write_text("내 기록\n")
+    run(env, "install", "--root", str(root))
+    first = (root / "CLAUDE.md").read_text()
+    run(env, "install", "--root", str(root))
+    assert (root / "CLAUDE.md").read_text() == first
+    assert (root / "SESSION.md").read_text() == "내 기록\n"
+
+
+def test_install_engine_specific_files(env, tmp_path):
+    root = _init(env, tmp_path)
+    cx, gy = tmp_path / "cx", tmp_path / "gy"
+    cx.mkdir(); gy.mkdir()
+    write_bots_json(env, {"cx": {"engine": "codex", "folder": str(cx), "session": "cx"},
+                          "gy": {"engine": "agy", "folder": str(gy), "session": "gy"}})
+    write_access(cx, ["1"]); write_access(gy, ["2"])
+    run(env, "employee", "add", "--root", str(root), "--dept", "크리에이티브팀", "--name", "비주얼", "--bot", "cx")
+    run(env, "employee", "add", "--root", str(root), "--dept", "커뮤니티·멤버십팀", "--name", "지원", "--bot", "gy")
+    assert run(env, "install", "--root", str(root)).returncode == 0
+    assert MS in (cx / "AGENTS.md").read_text()
+    g = (gy / ".agents/rules/ai-company.md").read_text()
+    assert g.startswith("---\ntrigger: always_on\n---\n") and MS in g
+
+
+def test_remove_restores_originals(env, tmp_path):
+    root = _init(env, tmp_path)
+    folder = tmp_path / "collab"
+    folder.mkdir()
+    (folder / "CLAUDE.md").write_text("# collab\n기존 규칙\n")
+    write_bots_json(env, {"collab": {"engine": "claude", "folder": str(folder), "session": "collab-bot"}})
+    write_access(folder, ["1"])
+    run(env, "employee", "add", "--root", str(root), "--dept", "비즈니스운영팀", "--name", "사업운영", "--bot", "collab")
+    run(env, "install", "--root", str(root))
+    r = run(env, "remove", "--root", str(root))
+    assert r.returncode == 0, r.stderr
+    assert (folder / "CLAUDE.md").read_text() == "# collab\n기존 규칙\n"
+    assert not (root / "CLAUDE.md").exists()          # 블록만 있던 파일은 삭제
+    assert (root / "직원명부.json").exists() and (root / "SESSION.md").exists()   # 기록 보존

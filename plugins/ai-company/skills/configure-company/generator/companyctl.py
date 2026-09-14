@@ -15,6 +15,12 @@ DEFAULT_DEPTS = ["경영기획실", "콘텐츠전략팀", "기술개발팀", "�
 COMPANY_DIRS = ["업무요청", "참고자료", "결과물", "docs", "tasks",
                 "runtime/inbox/pending", "runtime/inbox/received", "runtime/inbox/quarantine"]
 
+ASSETS = Path(__file__).resolve().parent.parent / "assets"
+MARK_START = "<!-- store:ai-company:start -->"
+MARK_END = "<!-- store:ai-company:end -->"
+AGY_HEADER = "---\ntrigger: always_on\n---\n"
+TEMPLATES = ["task.md", "업무요청.md", "log.md"]
+
 
 def die(msg: str, code: int = 1) -> None:
     print(msg, file=sys.stderr)
@@ -185,6 +191,102 @@ def cmd_employee(a) -> None:
     print(f"직원 등록: {e['dept']} / {e['name']} [{e['tool']}/{e['mode']}]" + (f" 채널 {e['channel_id']}" if e["channel_id"] else ""))
 
 
+def render(text: str, mapping: dict) -> str:
+    for k, v in mapping.items():
+        text = text.replace(k, v)
+    return text
+
+
+def directive_file(tool: str) -> tuple:
+    if tool == "codex":
+        return ("AGENTS.md", "")
+    if tool == "gemini":
+        return (".agents/rules/ai-company.md", AGY_HEADER)
+    return ("CLAUDE.md", "")
+
+
+def install_block(path: Path, body: str, header: str = ""):
+    cur = path.read_text(encoding="utf-8") if path.exists() else header
+    body = body.rstrip()
+    if MARK_START in cur and MARK_END in cur:
+        pre, rest = cur.split(MARK_START, 1)
+        old, post = rest.split(MARK_END, 1)
+        if old.strip("\n") == body:
+            return None
+        path.write_text(f"{pre}{MARK_START}\n{body}\n{MARK_END}{post}", encoding="utf-8")
+        return f"지침 블록 갱신: {path}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(cur + f"\n{MARK_START}\n{body}\n{MARK_END}\n", encoding="utf-8")
+    return f"지침 블록 설치: {path}"
+
+
+def remove_block(path: Path, header: str = ""):
+    if not path.exists():
+        return None
+    cur = path.read_text(encoding="utf-8")
+    if MARK_START not in cur or MARK_END not in cur:
+        return None
+    pre, rest = cur.split(MARK_START, 1)
+    _, post = rest.split(MARK_END, 1)
+    out = pre.rstrip("\n") + ("\n" if pre.strip() else "") + post.lstrip("\n")
+    if not out.strip() or out.strip() == header.strip():
+        path.unlink()
+        return f"지침 블록 제거 후 빈 파일 삭제: {path}"
+    path.write_text(out, encoding="utf-8")
+    return f"지침 블록 제거: {path}"
+
+
+def cmd_install(a) -> None:
+    root = Path(a.root).expanduser().resolve()
+    r = load_roster(root)
+    done = []
+    for d in COMPANY_DIRS + ["_templates"]:
+        (root / d).mkdir(parents=True, exist_ok=True)
+    for t in TEMPLATES:
+        dst = root / "_templates" / t
+        if not dst.exists():
+            dst.write_text((ASSETS / t).read_text(encoding="utf-8"), encoding="utf-8")
+            done.append(f"템플릿: {dst}")
+    sess = root / "SESSION.md"
+    if not sess.exists():
+        sess.write_text((ASSETS / "SESSION.template.md").read_text(encoding="utf-8"), encoding="utf-8")
+        done.append(f"SESSION.md 생성(템플릿): {sess}")
+    inbox = str(root / "runtime" / "inbox")
+    body = render((ASSETS / "company-block.md").read_text(encoding="utf-8"),
+                  {"{ROOT}": str(root), "{INBOX}": inbox, "{NAME}": r["name"]})
+    msg = install_block(root / "CLAUDE.md", body)
+    if msg:
+        done.append(msg)
+    for e in r["employees"]:
+        if e["mode"] == "on-demand" or not e["folder"]:
+            continue
+        fname, header = directive_file(e["tool"])
+        eb = render((ASSETS / "employee-block.md").read_text(encoding="utf-8"),
+                    {"{DEPT}": e["dept"], "{NAME}": e["name"], "{ROOT}": str(root)})
+        msg = install_block(Path(e["folder"]) / fname, eb, header)
+        if msg:
+            done.append(msg)
+    print("\n".join(done) if done else "변경 없음(이미 설치됨)")
+
+
+def cmd_remove(a) -> None:
+    root = Path(a.root).expanduser().resolve()
+    r = load_roster(root)
+    done = []
+    msg = remove_block(root / "CLAUDE.md")
+    if msg:
+        done.append(msg)
+    for e in r["employees"]:
+        if not e["folder"]:
+            continue
+        fname, header = directive_file(e["tool"])
+        msg = remove_block(Path(e["folder"]) / fname, header)
+        if msg:
+            done.append(msg)
+    done.append("보존: 직원명부.json · SESSION.md · 업무요청/ · 결과물/ · tasks/ · runtime/ (삭제는 사용자 몫)")
+    print("\n".join(done))
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="companyctl", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -219,9 +321,15 @@ def main() -> None:
     ep.add_argument("--replace", action="store_true")
     ep.set_defaults(fn=cmd_employee)
 
-    for name, help_ in [("install", "폴더·템플릿·지침 블록 설치"),
-                        ("remove", "지침 블록 제거(기록 보존)"), ("doctor", "읽기 전용 점검")]:
-        sub.add_parser(name, help=help_).set_defaults(fn=lambda a: die("아직 구현되지 않은 명령", 2))
+    inp = sub.add_parser("install", help="폴더·템플릿·지침 블록 설치")
+    inp.add_argument("--root", default=".")
+    inp.set_defaults(fn=cmd_install)
+
+    rp = sub.add_parser("remove", help="지침 블록 제거(기록 보존)")
+    rp.add_argument("--root", default=".")
+    rp.set_defaults(fn=cmd_remove)
+
+    sub.add_parser("doctor", help="읽기 전용 점검").set_defaults(fn=lambda a: die("아직 구현되지 않은 명령", 2))
 
     a = p.parse_args()
     a.fn(a)
