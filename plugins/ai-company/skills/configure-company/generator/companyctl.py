@@ -92,6 +92,74 @@ def cmd_list(a) -> None:
             print(f"  {d}: {e['name']} [{e['tool']}/{e['mode']}] {where}")
 
 
+def bots_json_path() -> Path:
+    return Path.home() / ".config" / "folder-bot" / "bots.json"
+
+
+def read_bots() -> dict:
+    p = bots_json_path()
+    if not p.exists():
+        return {}
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def channel_id_of(folder: Path) -> list:
+    p = folder / ".discord-state" / "access.json"
+    if not p.exists():
+        return []
+    try:
+        return list(json.loads(p.read_text(encoding="utf-8")).get("groups", {}).keys())
+    except (ValueError, AttributeError):
+        return []
+
+
+def tool_of_engine(engine: str) -> str:
+    return {"claude": "claude", "codex": "codex", "agy": "gemini", "gemini": "gemini"}.get(engine, engine)
+
+
+def cmd_employee(a) -> None:
+    root = Path(a.root).expanduser().resolve()
+    r = load_roster(root)
+    if a.action == "remove":
+        before = len(r["employees"])
+        r["employees"] = [e for e in r["employees"] if e["name"] != a.name]
+        if len(r["employees"]) == before:
+            die(f"직원 {a.name}이 명부에 없습니다")
+        save_roster(root, r)
+        print(f"직원 제거: {a.name}")
+        return
+    if not a.dept:
+        die("--dept 필요")
+    if a.dept not in r["departments"]:
+        die(f"부서 {a.dept}이 명부에 없습니다 — `companyctl dept add --name {a.dept}` 먼저")
+    if sum(map(bool, [a.bot, a.folder, a.on_demand])) != 1:
+        die("--bot <이름> | --folder <폴더> | --on-demand 중 하나만 지정")
+    exists = [e for e in r["employees"] if e["name"] == a.name]
+    if exists and not a.replace:
+        die(f"직원 {a.name}이 이미 있습니다 (--replace로 교체)")
+    e = {"dept": a.dept, "name": a.name, "tool": "claude", "mode": "on-demand",
+         "session": "", "folder": "", "bot": "", "channel_id": ""}
+    if a.bot:
+        bots = read_bots()
+        if a.bot not in bots:
+            die(f"folder-bot bots.json에 {a.bot} 봇이 없습니다: {bots_json_path()}")
+        b = bots[a.bot]
+        folder = Path(b["folder"])
+        ids = channel_id_of(folder)
+        cid = a.channel_id or (ids[0] if len(ids) == 1 else "")
+        if not cid:
+            die(f"채널 ID를 정할 수 없습니다(access.json groups: {ids}) — --channel-id <ID>로 지정")
+        e.update(tool=tool_of_engine(b.get("engine", "claude")), mode="bot", session=b.get("session", ""),
+                 folder=str(folder), bot=a.bot, channel_id=cid)
+    elif a.folder:
+        folder = Path(a.folder).expanduser().resolve()
+        folder.mkdir(parents=True, exist_ok=True)
+        e.update(tool=tool_of_engine(a.engine), mode="folder", folder=str(folder))
+    r["employees"] = [x for x in r["employees"] if x["name"] != a.name] + [e]
+    save_roster(root, r)
+    print(f"직원 등록: {e['dept']} / {e['name']} [{e['tool']}/{e['mode']}]" + (f" 채널 {e['channel_id']}" if e["channel_id"] else ""))
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="companyctl", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -113,7 +181,20 @@ def main() -> None:
     lp.add_argument("--json", action="store_true")
     lp.set_defaults(fn=cmd_list)
 
-    for name, help_ in [("employee", "직원 등록/제거"), ("install", "폴더·템플릿·지침 블록 설치"),
+    ep = sub.add_parser("employee", help="직원 등록/제거")
+    ep.add_argument("action", choices=["add", "remove"])
+    ep.add_argument("--root", default=".")
+    ep.add_argument("--name", required=True)
+    ep.add_argument("--dept")
+    ep.add_argument("--bot", help="folder-bot bots.json의 봇 이름(기존 봇 등록)")
+    ep.add_argument("--folder", help="새 부서 폴더(봇은 나중에 configure-bot으로)")
+    ep.add_argument("--engine", choices=["claude", "codex", "agy", "gemini"], default="claude")
+    ep.add_argument("--on-demand", action="store_true", help="호출형(폴더·봇 없음)")
+    ep.add_argument("--channel-id")
+    ep.add_argument("--replace", action="store_true")
+    ep.set_defaults(fn=cmd_employee)
+
+    for name, help_ in [("install", "폴더·템플릿·지침 블록 설치"),
                         ("remove", "지침 블록 제거(기록 보존)"), ("doctor", "읽기 전용 점검")]:
         sub.add_parser(name, help=help_).set_defaults(fn=lambda a: die("아직 구현되지 않은 명령", 2))
 
