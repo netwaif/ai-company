@@ -260,13 +260,28 @@ def cmd_install(a) -> None:
     msg = install_block(root / "CLAUDE.md", body)
     if msg:
         done.append(msg)
+    groups = {}
+    order = []
     for e in r["employees"]:
         if e["mode"] == "on-demand" or not e["folder"]:
             continue
-        fname, header = directive_file(e["tool"])
+        folder = Path(e["folder"]).expanduser().resolve()
+        if not folder.is_dir():
+            done.append(f"WARN 폴더 없음 — 건너뜀: {folder} ({e['name']})")
+            continue
+        key = (folder, e["tool"])
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(e)
+    for key in order:
+        folder, tool = key
+        emps = groups[key]
+        fname, header = directive_file(tool)
+        roles = "\n".join(f"- {e['dept']} · {e['name']}" for e in emps)
         eb = render((ASSETS / "employee-block.md").read_text(encoding="utf-8"),
-                    {"{DEPT}": e["dept"], "{NAME}": e["name"], "{ROOT}": str(root)})
-        msg = install_block(Path(e["folder"]) / fname, eb, header)
+                    {"{ROLES}": roles, "{ROOT}": str(root)})
+        msg = install_block(folder / fname, eb, header)
         if msg:
             done.append(msg)
     print("\n".join(done) if done else "변경 없음(이미 설치됨)")

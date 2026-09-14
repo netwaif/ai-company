@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 from conftest import run, write_bots_json, write_access
 
@@ -234,6 +235,36 @@ def test_remove_restores_originals(env, tmp_path):
     assert (folder / "CLAUDE.md").read_text() == "# collab\n기존 규칙\n"
     assert not (root / "CLAUDE.md").exists()          # 블록만 있던 파일은 삭제
     assert (root / "직원명부.json").exists() and (root / "SESSION.md").exists()   # 기록 보존
+
+
+def test_install_two_employees_one_folder_keeps_both(env, tmp_path):
+    root = _init(env, tmp_path)
+    folder = tmp_path / "shared"
+    folder.mkdir()
+    write_bots_json(env, {"a": {"engine": "claude", "folder": str(folder), "session": "s"},
+                          "b": {"engine": "claude", "folder": str(folder), "session": "s"}})
+    write_access(folder, ["1"])
+    run(env, "employee", "add", "--root", str(root), "--dept", "비즈니스운영팀", "--name", "사업운영", "--bot", "a")
+    run(env, "employee", "add", "--root", str(root), "--dept", "커뮤니티·멤버십팀", "--name", "지원", "--bot", "b")
+    r = run(env, "install", "--root", str(root))
+    assert r.returncode == 0, r.stderr
+    cm = (folder / "CLAUDE.md").read_text()
+    assert "사업운영" in cm and "지원" in cm
+    assert cm.count(MS) == 1
+
+
+def test_install_skips_missing_employee_folder(env, tmp_path):
+    root = _init(env, tmp_path)
+    folder = tmp_path / "gone"
+    folder.mkdir()
+    write_bots_json(env, {"g": {"engine": "claude", "folder": str(folder), "session": "s"}})
+    write_access(folder, ["1"])
+    run(env, "employee", "add", "--root", str(root), "--dept", "비즈니스운영팀", "--name", "사업운영", "--bot", "g")
+    shutil.rmtree(folder)
+    r = run(env, "install", "--root", str(root))
+    assert r.returncode == 0, r.stderr
+    assert not folder.exists()
+    assert "WARN" in r.stdout
 
 
 def test_doctor_ok_after_install(env, tmp_path):
