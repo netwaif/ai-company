@@ -6,6 +6,9 @@
 import argparse
 import json
 import os
+import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -287,6 +290,102 @@ def cmd_remove(a) -> None:
     print("\n".join(done))
 
 
+def which(name: str):
+    return shutil.which(name)
+
+
+def check_agentlayer() -> tuple:
+    exe = which("agentlayer")
+    if not exe:
+        return (False, "agentlayer 없음 — brew install netwaif/tap/agentlayer && agentlayer init")
+    try:
+        out = subprocess.run([exe, "version"], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.TimeoutExpired) as ex:
+        return (False, f"agentlayer version 실행 실패: {ex}")
+    m = re.search(r"v(\d+)\.(\d+)\.(\d+)", out)
+    if not m:
+        return (False, f"agentlayer 버전 해석 실패: {out.strip()}")
+    ver = tuple(int(x) for x in m.groups())
+    if ver < (1, 5, 0):
+        return (False, f"agentlayer v{'.'.join(map(str, ver))} — 1.5.0 이상 필요(brew upgrade netwaif/tap/agentlayer && agentlayer init)")
+    return (True, f"agentlayer v{'.'.join(map(str, ver))}")
+
+
+def task_rows() -> list:
+    exe = which("agentlayer")
+    if not exe:
+        return []
+    try:
+        out = subprocess.run([exe, "task", "list", "--json"], capture_output=True, text=True, timeout=10).stdout
+        rows = json.loads(out or "[]")
+        return rows if isinstance(rows, list) else []
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return []
+
+
+def active_tasks(root: Path) -> int:
+    n = 0
+    for d in (root / "tasks").glob("*/task.md"):
+        m = re.search(r"^status:\s*(\S+)", d.read_text(encoding="utf-8"), re.M)
+        if m and (m.group(1) in ("in_progress", "reviewing") or m.group(1).startswith("waiting_")):
+            n += 1
+    return n
+
+
+def cmd_doctor(a) -> None:
+    root = Path(a.root).expanduser().resolve()
+    r = load_roster(root)
+    lines = []
+    fail = False
+
+    def ok(m): lines.append("OK   " + m)
+    def warn(m): lines.append("WARN " + m)
+    def bad(m):
+        nonlocal fail
+        fail = True
+        lines.append("FAIL " + m)
+
+    good, msg = check_agentlayer()
+    (ok if good else bad)(msg)
+    for tool in ("bot-thread", "bot-up", "tmux"):
+        (ok if which(tool) else bad)(f"{tool}: {which(tool) or '없음 — folder-bot 플러그인/tmux 설치'}")
+    (ok if bots_json_path().exists() else warn)(f"folder-bot bots.json: {bots_json_path()}")
+    if r.get("version") != 1 or not isinstance(r.get("employees"), list):
+        bad("직원명부 스키마: version/employees 이상")
+    else:
+        ok(f"직원명부: 부서 {len(r['departments'])}개, 직원 {len(r['employees'])}명")
+    (ok if (root / "CLAUDE.md").exists() and MARK_START in (root / "CLAUDE.md").read_text(encoding="utf-8") else bad)(
+        f"회사 CLAUDE.md 총괄 블록: {root / 'CLAUDE.md'}")
+    for sub in ("pending", "received", "quarantine"):
+        p = root / "runtime" / "inbox" / sub
+        (ok if p.is_dir() else bad)(f"수신함 {sub}/: {p}")
+    bots = read_bots()
+    for d in r["departments"]:
+        emps = [e for e in r["employees"] if e["dept"] == d]
+        if not emps:
+            warn(f"{d}: 직원 없음(호출형으로 운영)")
+        for e in emps:
+            if e["mode"] == "on-demand":
+                ok(f"{d}/{e['name']}: 호출형")
+                continue
+            if e["mode"] == "folder":
+                warn(f"{d}/{e['name']}: 폴더만 있음({e['folder']}) — configure-bot으로 봇 연결 뒤 `employee add --bot`로 갱신")
+                continue
+            folder = Path(e["folder"])
+            fname, _ = directive_file(e["tool"])
+            block_ok = (folder / fname).exists() and MARK_START in (folder / fname).read_text(encoding="utf-8")
+            reg = e["bot"] in bots
+            (ok if folder.is_dir() and block_ok and reg and e["channel_id"] else bad)(
+                f"{d}/{e['name']} [{e['tool']}] 폴더={'있음' if folder.is_dir() else '없음'} 지침블록={'있음' if block_ok else '없음'} "
+                f"bots.json={'등록' if reg else '미등록'} 채널={e['channel_id'] or '없음'} 세션={e['session']}")
+    for row in task_rows():
+        if row.get("state") in ("stale", "gone"):
+            warn(f"업무 {row.get('task_id')} 세션 {row.get('session')}: {row.get('state')} — 재배정 또는 `agentlayer task done`")
+    ok(f"활성 업무(tasks/): {active_tasks(root)}건")
+    print("\n".join(lines))
+    sys.exit(1 if fail else 0)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="companyctl", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -329,7 +428,9 @@ def main() -> None:
     rp.add_argument("--root", default=".")
     rp.set_defaults(fn=cmd_remove)
 
-    sub.add_parser("doctor", help="읽기 전용 점검").set_defaults(fn=lambda a: die("아직 구현되지 않은 명령", 2))
+    dop = sub.add_parser("doctor", help="읽기 전용 점검")
+    dop.add_argument("--root", default=".")
+    dop.set_defaults(fn=cmd_doctor)
 
     a = p.parse_args()
     a.fn(a)

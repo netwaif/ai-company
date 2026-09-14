@@ -234,3 +234,37 @@ def test_remove_restores_originals(env, tmp_path):
     assert (folder / "CLAUDE.md").read_text() == "# collab\n기존 규칙\n"
     assert not (root / "CLAUDE.md").exists()          # 블록만 있던 파일은 삭제
     assert (root / "직원명부.json").exists() and (root / "SESSION.md").exists()   # 기록 보존
+
+
+def test_doctor_ok_after_install(env, tmp_path):
+    root = _init(env, tmp_path)
+    folder = tmp_path / "collab"; folder.mkdir()
+    write_bots_json(env, {"collab": {"engine": "claude", "folder": str(folder), "session": "collab-bot"}})
+    write_access(folder, ["1"])
+    run(env, "employee", "add", "--root", str(root), "--dept", "비즈니스운영팀", "--name", "사업운영", "--bot", "collab")
+    run(env, "install", "--root", str(root))
+    r = run(env, "doctor", "--root", str(root))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "OK   agentlayer v1.5.0" in r.stdout and "FAIL" not in r.stdout
+    assert "WARN 콘텐츠전략팀" in r.stdout      # 직원 없는 부서는 경고(호출형)
+
+
+def test_doctor_fails_on_old_agentlayer_and_missing_block(env, tmp_path):
+    root = _init(env, tmp_path)
+    run(env, "install", "--root", str(root))
+    (root / "CLAUDE.md").unlink()
+    shim = Path(env["PATH"].split(":")[0]) / "agentlayer"
+    shim.write_text('#!/bin/sh\ncase "$1" in version) echo "agentlayer v1.4.5 (commit x, 2026-09-14)";; task) echo "[]";; esac\n')
+    r = run(env, "doctor", "--root", str(root))
+    assert r.returncode == 1
+    assert "FAIL agentlayer" in r.stdout and "1.5.0" in r.stdout
+    assert "FAIL 회사 CLAUDE.md" in r.stdout
+
+
+def test_doctor_warns_stale_assignments(env, tmp_path):
+    root = _init(env, tmp_path)
+    run(env, "install", "--root", str(root))
+    shim = Path(env["PATH"].split(":")[0]) / "agentlayer"
+    shim.write_text('#!/bin/sh\ncase "$1" in version) echo "agentlayer v1.5.0 (commit x, 2026-09-14)";; task) echo \'[{"task_id":"T-1","session":"s","state":"stale"}]\';; esac\n')
+    r = run(env, "doctor", "--root", str(root))
+    assert "WARN 업무 T-1" in r.stdout and "stale" in r.stdout
