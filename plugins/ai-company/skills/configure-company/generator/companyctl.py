@@ -29,7 +29,17 @@ def load_roster(root: Path) -> dict:
     p = roster_path(root)
     if not p.exists():
         die(f"직원명부가 없습니다: {p} — 먼저 `companyctl init --root {root}`")
-    return json.loads(p.read_text(encoding="utf-8"))
+    try:
+        r = json.loads(p.read_text(encoding="utf-8"))
+    except ValueError:
+        die(f"직원명부 JSON 손상: {p}")
+    r.setdefault("version", 1)
+    r.setdefault("name", "AI 회사")
+    r.setdefault("departments", [])
+    r.setdefault("employees", [])
+    if not isinstance(r["departments"], list) or not isinstance(r["employees"], list):
+        die(f"직원명부 JSON 손상: {p}")
+    return r
 
 
 def save_roster(root: Path, r: dict) -> None:
@@ -54,7 +64,17 @@ def cmd_init(a) -> None:
             save_roster(root, r)
         print(f"직원명부 유지: {p} (직원 {len(r['employees'])}명, 부서 {len(r['departments'])}개)")
         return
-    depts = [d.strip() for d in a.depts.split(",")] if a.depts else list(DEFAULT_DEPTS)
+    if a.depts:
+        seen = []
+        for d in a.depts.split(","):
+            d = d.strip()
+            if d and d not in seen:
+                seen.append(d)
+        if not seen:
+            die("--depts에 부서가 없습니다")
+        depts = seen
+    else:
+        depts = list(DEFAULT_DEPTS)
     r = {"version": 1, "name": a.name or "AI 회사", "departments": depts, "employees": []}
     save_roster(root, r)
     print(f"직원명부 생성: {p} (부서 {len(depts)}개)")
@@ -100,7 +120,10 @@ def read_bots() -> dict:
     p = bots_json_path()
     if not p.exists():
         return {}
-    return json.loads(p.read_text(encoding="utf-8"))
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except ValueError:
+        die(f"bots.json JSON 손상: {p}")
 
 
 def channel_id_of(folder: Path) -> list:
@@ -144,6 +167,8 @@ def cmd_employee(a) -> None:
         if a.bot not in bots:
             die(f"folder-bot bots.json에 {a.bot} 봇이 없습니다: {bots_json_path()}")
         b = bots[a.bot]
+        if not b.get("folder"):
+            die(f"bots.json의 {a.bot} 봇에 folder가 없습니다: {bots_json_path()}")
         folder = Path(b["folder"])
         ids = channel_id_of(folder)
         cid = a.channel_id or (ids[0] if len(ids) == 1 else "")

@@ -126,3 +126,40 @@ def test_employee_add_duplicate_needs_replace_and_remove(env, tmp_path):
     assert run(env, "employee", "remove", "--root", str(root), "--name", "QA 담당").returncode == 0
     assert json.loads((root / "직원명부.json").read_text())["employees"] == []
     assert run(env, "employee", "remove", "--root", str(root), "--name", "QA 담당").returncode != 0
+
+
+def test_employee_add_bot_missing_folder_field(env, tmp_path):
+    root = _init(env, tmp_path)
+    write_bots_json(env, {"nofolder": {"engine": "claude", "session": "s"}})
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "비즈니스운영팀", "--name", "x", "--bot", "nofolder")
+    assert r.returncode != 0
+    assert "folder" in r.stderr
+    assert "Traceback" not in r.stderr
+
+
+def test_corrupted_roster_json_dies_cleanly(env, tmp_path):
+    root = _init(env, tmp_path)
+    (root / "직원명부.json").write_text("{not json")
+    r = run(env, "list", "--root", str(root))
+    assert r.returncode != 0
+    assert "손상" in r.stderr
+    assert "Traceback" not in r.stderr
+
+
+def test_corrupted_bots_json_dies_cleanly(env, tmp_path):
+    root = _init(env, tmp_path)
+    cfg = Path(env["HOME"]) / ".config/folder-bot"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "bots.json").write_text("{not json")
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "비즈니스운영팀", "--name", "x", "--bot", "collab")
+    assert r.returncode != 0
+    assert "손상" in r.stderr
+    assert "Traceback" not in r.stderr
+
+
+def test_init_depts_dedupe_and_strip_empty(env, tmp_path):
+    root = tmp_path / "c"
+    run(env, "init", "--root", str(root), "--depts", "a,,a, b ,")
+    assert json.loads((root / "직원명부.json").read_text())["departments"] == ["a", "b"]
+    r = run(env, "init", "--root", str(tmp_path / "c2"), "--depts", ",,")
+    assert r.returncode != 0
