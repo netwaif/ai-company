@@ -7,8 +7,10 @@ agentlayer의 배관(`send`·`task`·훅 자동 보고)과 folder-bot(봇·스�
 
 ```
 brew install netwaif/tap/agentlayer && agentlayer init        # 있으면 brew upgrade 뒤 init
-/plugin marketplace add netwaif/folder-bot  →  /plugin install folder-bot
-/plugin marketplace add netwaif/ai-company  →  /plugin install ai-company
+/plugin marketplace add netwaif/folder-bot
+/plugin install folder-bot@folder-bot
+/plugin marketplace add netwaif/ai-company
+/plugin install ai-company@ai-company
 ```
 
 ## 사용

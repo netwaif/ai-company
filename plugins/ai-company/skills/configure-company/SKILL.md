@@ -15,10 +15,10 @@ description: Use when the user wants to build or operate an "AI company" on top 
 
 ### 1. 전제 점검
 ```bash
-python3 "<이 스킬 폴더>/generator/companyctl.py" doctor --root <회사 루트>   # 명부가 없으면 아래 init 뒤에 다시
+python3 "<이 스킬 폴더>/generator/companyctl.py" doctor --root <회사 루트>
 ```
 - agentlayer ≥ 1.5.0(`agentlayer version`). 없거나 낮으면: `brew install netwaif/tap/agentlayer && agentlayer init`(리눅스: README의 install.sh). 그 뒤 반드시 `agentlayer init`.
-- folder-bot 플러그인(`bot-thread`·`bot-up`가 `~/.local/bin`에 있음). 없으면 `/plugin marketplace add netwaif/folder-bot` → `/plugin install folder-bot` 안내 후 중단.
+- folder-bot 플러그인(`bot-thread`·`bot-up`가 `~/.local/bin`에 있음). 없으면 `/plugin marketplace add netwaif/folder-bot`, `/plugin install folder-bot@folder-bot` 안내 후 중단.
 - tmux.
 
 ### 2. 질문 (AskUserQuestion 한 번에)
@@ -52,7 +52,7 @@ python3 "<이 스킬 폴더>/generator/companyctl.py" install --root <루트>
 ```bash
 python3 "<이 스킬 폴더>/generator/companyctl.py" doctor --root <루트>
 ```
-FAIL이 없으면 무해한 사슬 한 번: 총괄 채널(또는 회사 루트의 claude 세션)에서 "직원 <이름>에게 '도구 없이 OK라고만 답해'를 업무 LAB-1로 보내고 보고를 기다려 줘". 총괄 절차대로 스레드 생성 → `task assign` → `send` → Monitor 이벤트 `to: DONE_UNREAD`가 오면 성공. 결과를 사용자에게 그대로 보여 준다.
+FAIL이 없으면 무해한 사슬 한 번: 총괄 채널(또는 회사 루트의 claude 세션)에서 "직원 <이름>에게 '도구 없이 OK라고만 답해'를 업무 LAB-1로 보내고 보고를 기다려 줘". 총괄 절차대로 스레드 생성(`bot-thread open`) → `bot-thread ensure`(창·세션 생성, 준비까지 최대 60초; 출력은 에이전트 이름이며 창 이름이 아님) → `task assign` → `send` → Monitor 이벤트 `to: DONE_UNREAD`가 오면 성공. 결과를 사용자에게 그대로 보여 준다.
 
 ## 직원 추가·제거 / 부서 추가·제거
 `companyctl employee add|remove`, `companyctl dept add|remove` 뒤 반드시 `companyctl install`(블록 갱신). 직원 제거는 명부에서만 빼며 그 폴더의 블록은 `install`이 다시 돌 때 유지된다 — 블록까지 걷으려면 먼저 `companyctl remove`, 명부 수정, `install`.

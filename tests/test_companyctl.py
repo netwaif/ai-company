@@ -299,3 +299,100 @@ def test_doctor_warns_stale_assignments(env, tmp_path):
     shim.write_text('#!/bin/sh\ncase "$1" in version) echo "agentlayer v1.5.0 (commit x, 2026-09-14)";; task) echo \'[{"task_id":"T-1","session":"s","state":"stale"}]\';; esac\n')
     r = run(env, "doctor", "--root", str(root))
     assert "WARN 업무 T-1" in r.stdout and "stale" in r.stdout
+
+
+# --- I2: 회사 루트를 직원으로 등록하면 총괄 블록이 날아가는 문제 ---
+
+def test_employee_add_bot_at_root_folder_rejected(env, tmp_path):
+    root = _init(env, tmp_path)
+    write_bots_json(env, {"company": {"engine": "claude", "folder": str(root), "session": "s"}})
+    write_access(root, ["1"])
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "경영기획실", "--name", "총괄", "--bot", "company")
+    assert r.returncode != 0
+    assert "회사 루트는 직원으로 등록할 수 없습니다(총괄 폴더)" in r.stderr
+
+
+def test_employee_add_folder_at_root_rejected(env, tmp_path):
+    root = _init(env, tmp_path)
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "경영기획실", "--name", "총괄", "--folder", str(root))
+    assert r.returncode != 0
+    assert "회사 루트는 직원으로 등록할 수 없습니다(총괄 폴더)" in r.stderr
+
+
+def test_install_skips_root_as_employee_with_warn(env, tmp_path):
+    root = _init(env, tmp_path)
+    p = root / "직원명부.json"
+    r = json.loads(p.read_text())
+    r["employees"].append({"dept": "경영기획실", "name": "총괄", "tool": "claude", "mode": "bot",
+                            "session": "s", "folder": str(root), "bot": "company", "channel_id": "1"})
+    p.write_text(json.dumps(r, ensure_ascii=False))
+    result = run(env, "install", "--root", str(root))
+    assert result.returncode == 0, result.stderr
+    assert "WARN" in result.stdout
+    assert "총괄 절차" in (root / "CLAUDE.md").read_text()
+
+
+# --- I3: 명부 없이도 doctor는 환경 점검을 수행해야 한다 ---
+
+def test_doctor_without_roster_warns_and_exits_zero(env, tmp_path):
+    root = tmp_path / "empty"
+    r = run(env, "doctor", "--root", str(root))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "OK   agentlayer v1.5.0" in r.stdout
+    assert "WARN 직원명부 없음" in r.stdout
+
+
+# --- I5: bots.json folder의 ~ 확장 ---
+
+def test_employee_add_bot_folder_tilde_expanded(env, tmp_path):
+    root = _init(env, tmp_path)
+    home = Path(env["HOME"])
+    folder = home / "tilde-emp"
+    folder.mkdir(parents=True)
+    write_bots_json(env, {"t": {"engine": "claude", "folder": "~/tilde-emp", "session": "s"}})
+    write_access(folder, ["1"])
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "비즈니스운영팀", "--name", "x", "--bot", "t")
+    assert r.returncode == 0, r.stderr
+    e = json.loads((root / "직원명부.json").read_text())["employees"][0]
+    assert e["folder"] == str(folder)
+    assert Path(e["folder"]).is_absolute()
+
+
+# --- M9: 손으로 편집한 레코드에 필드가 빠져도 KeyError 없이 동작 ---
+
+def test_list_survives_employee_record_missing_fields(env, tmp_path):
+    root = _init(env, tmp_path)
+    p = root / "직원명부.json"
+    r = json.loads(p.read_text())
+    r["employees"].append({"dept": "경영기획실", "name": "부실직원"})
+    p.write_text(json.dumps(r, ensure_ascii=False))
+    result = run(env, "list", "--root", str(root))
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+# --- M10: 마커 순서가 뒤집힌 파일은 손상으로 취급 ---
+
+def test_install_marker_order_corrupted_dies_cleanly(env, tmp_path):
+    root = _init(env, tmp_path)
+    (root / "CLAUDE.md").write_text(f"{ME}\n뒤집힘\n{MS}\n")
+    r = run(env, "install", "--root", str(root))
+    assert r.returncode != 0
+    assert "마커" in r.stderr
+    assert "Traceback" not in r.stderr
+
+
+# --- M8: doctor가 총괄 봇 등록 여부를 점검 ---
+
+def test_doctor_warns_when_manager_bot_missing(env, tmp_path):
+    root = _init(env, tmp_path)
+    run(env, "install", "--root", str(root))
+    r = run(env, "doctor", "--root", str(root))
+    assert "WARN 총괄 봇 미등록" in r.stdout
+
+
+def test_doctor_ok_when_manager_bot_registered(env, tmp_path):
+    root = _init(env, tmp_path)
+    run(env, "install", "--root", str(root))
+    write_bots_json(env, {"company": {"engine": "claude", "folder": str(root), "session": "company-bot"}})
+    r = run(env, "doctor", "--root", str(root))
+    assert "OK   총괄 봇: company (세션 company-bot)" in r.stdout

@@ -48,6 +48,11 @@ def load_roster(root: Path) -> dict:
     r.setdefault("employees", [])
     if not isinstance(r["departments"], list) or not isinstance(r["employees"], list):
         die(f"직원명부 JSON 손상: {p}")
+    for e in r["employees"]:
+        if isinstance(e, dict):
+            for k, dv in (("dept", ""), ("name", ""), ("tool", "claude"), ("mode", "on-demand"),
+                          ("session", ""), ("folder", ""), ("bot", ""), ("channel_id", "")):
+                e.setdefault(k, dv)
     return r
 
 
@@ -178,7 +183,9 @@ def cmd_employee(a) -> None:
         b = bots[a.bot]
         if not b.get("folder"):
             die(f"bots.json의 {a.bot} 봇에 folder가 없습니다: {bots_json_path()}")
-        folder = Path(b["folder"])
+        folder = Path(b["folder"]).expanduser().resolve()
+        if folder == root:
+            die("회사 루트는 직원으로 등록할 수 없습니다(총괄 폴더)")
         ids = channel_id_of(folder)
         cid = a.channel_id or (ids[0] if len(ids) == 1 else "")
         if not cid:
@@ -187,6 +194,8 @@ def cmd_employee(a) -> None:
                  folder=str(folder), bot=a.bot, channel_id=cid)
     elif a.folder:
         folder = Path(a.folder).expanduser().resolve()
+        if folder == root:
+            die("회사 루트는 직원으로 등록할 수 없습니다(총괄 폴더)")
         folder.mkdir(parents=True, exist_ok=True)
         e.update(tool=tool_of_engine(a.engine), mode="folder", folder=str(folder))
     r["employees"] = [x for x in r["employees"] if x["name"] != a.name] + [e]
@@ -212,6 +221,8 @@ def install_block(path: Path, body: str, header: str = ""):
     cur = path.read_text(encoding="utf-8") if path.exists() else header
     body = body.rstrip()
     if MARK_START in cur and MARK_END in cur:
+        if cur.index(MARK_END) < cur.index(MARK_START):
+            die(f"지침 블록 마커 순서가 잘못됐습니다: {path}")
         pre, rest = cur.split(MARK_START, 1)
         old, post = rest.split(MARK_END, 1)
         if old.strip("\n") == body:
@@ -229,6 +240,8 @@ def remove_block(path: Path, header: str = ""):
     cur = path.read_text(encoding="utf-8")
     if MARK_START not in cur or MARK_END not in cur:
         return None
+    if cur.index(MARK_END) < cur.index(MARK_START):
+        die(f"지침 블록 마커 순서가 잘못됐습니다: {path}")
     pre, rest = cur.split(MARK_START, 1)
     _, post = rest.split(MARK_END, 1)
     out = pre.rstrip("\n") + ("\n" if pre.strip() else "") + post.lstrip("\n")
@@ -266,6 +279,9 @@ def cmd_install(a) -> None:
         if e["mode"] == "on-demand" or not e["folder"]:
             continue
         folder = Path(e["folder"]).expanduser().resolve()
+        if folder == root:
+            done.append(f"WARN 회사 루트는 직원으로 등록할 수 없습니다(총괄 폴더) — 건너뜀: {e['name']}")
+            continue
         if not folder.is_dir():
             done.append(f"WARN 폴더 없음 — 건너뜀: {folder} ({e['name']})")
             continue
@@ -298,7 +314,7 @@ def cmd_remove(a) -> None:
         if not e["folder"]:
             continue
         fname, header = directive_file(e["tool"])
-        msg = remove_block(Path(e["folder"]) / fname, header)
+        msg = remove_block(Path(e["folder"]).expanduser() / fname, header)
         if msg:
             done.append(msg)
     done.append("보존: 직원명부.json · SESSION.md · 업무요청/ · 결과물/ · tasks/ · runtime/ (삭제는 사용자 몫)")
@@ -349,7 +365,6 @@ def active_tasks(root: Path) -> int:
 
 def cmd_doctor(a) -> None:
     root = Path(a.root).expanduser().resolve()
-    r = load_roster(root)
     lines = []
     fail = False
 
@@ -365,6 +380,13 @@ def cmd_doctor(a) -> None:
     for tool in ("bot-thread", "bot-up", "tmux"):
         (ok if which(tool) else bad)(f"{tool}: {which(tool) or '없음 — folder-bot 플러그인/tmux 설치'}")
     (ok if bots_json_path().exists() else warn)(f"folder-bot bots.json: {bots_json_path()}")
+
+    if not roster_path(root).exists():
+        warn(f"직원명부 없음 — companyctl init --root {root} 먼저")
+        print("\n".join(lines))
+        sys.exit(1 if fail else 0)
+
+    r = load_roster(root)
     if r.get("version") != 1 or not isinstance(r.get("employees"), list):
         bad("직원명부 스키마: version/employees 이상")
     else:
@@ -375,6 +397,12 @@ def cmd_doctor(a) -> None:
         p = root / "runtime" / "inbox" / sub
         (ok if p.is_dir() else bad)(f"수신함 {sub}/: {p}")
     bots = read_bots()
+    mgr = next((n for n, b in bots.items()
+                if b.get("folder") and Path(b["folder"]).expanduser().resolve() == root), None)
+    if mgr:
+        ok(f"총괄 봇: {mgr} (세션 {bots[mgr].get('session', '')})")
+    else:
+        warn("총괄 봇 미등록 — 회사 루트에서 folder-bot configure-bot 실행")
     for d in r["departments"]:
         emps = [e for e in r["employees"] if e["dept"] == d]
         if not emps:
@@ -386,7 +414,7 @@ def cmd_doctor(a) -> None:
             if e["mode"] == "folder":
                 warn(f"{d}/{e['name']}: 폴더만 있음({e['folder']}) — configure-bot으로 봇 연결 뒤 `employee add --bot`로 갱신")
                 continue
-            folder = Path(e["folder"])
+            folder = Path(e["folder"]).expanduser()
             fname, _ = directive_file(e["tool"])
             block_ok = (folder / fname).exists() and MARK_START in (folder / fname).read_text(encoding="utf-8")
             reg = e["bot"] in bots
