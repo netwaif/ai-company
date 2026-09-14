@@ -55,7 +55,7 @@ def cmd_init(a) -> None:
         (root / d).mkdir(parents=True, exist_ok=True)
     p = roster_path(root)
     if p.exists():
-        r = json.loads(p.read_text(encoding="utf-8"))
+        r = load_roster(root)
         changed = False
         if a.name and r.get("name") != a.name:
             r["name"] = a.name

@@ -163,3 +163,12 @@ def test_init_depts_dedupe_and_strip_empty(env, tmp_path):
     assert json.loads((root / "직원명부.json").read_text())["departments"] == ["a", "b"]
     r = run(env, "init", "--root", str(tmp_path / "c2"), "--depts", ",,")
     assert r.returncode != 0
+
+
+def test_init_on_corrupted_roster_dies_cleanly(env, tmp_path):
+    root = _init(env, tmp_path)
+    (root / "직원명부.json").write_text("{not json")
+    r = run(env, "init", "--root", str(root))
+    assert r.returncode != 0
+    assert "손상" in r.stderr
+    assert "Traceback" not in r.stderr
