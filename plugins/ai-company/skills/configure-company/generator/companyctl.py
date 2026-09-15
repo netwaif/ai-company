@@ -196,8 +196,18 @@ def cmd_employee(a) -> None:
         folder = Path(a.folder).expanduser().resolve()
         if folder == root:
             die("회사 루트는 직원으로 등록할 수 없습니다(총괄 폴더)")
-        folder.mkdir(parents=True, exist_ok=True)
-        e.update(tool=tool_of_engine(a.engine), mode="folder", folder=str(folder))
+        if a.session:
+            # folder-bot 밖에서 도는 봇(LaunchAgent·codex-discord 브리지 등) — 세션을 직접 지정한 외부 봇.
+            # 총괄은 스레드 없이 세션에 직접 보낸다. 채널 ID는 있으면 기록, 없어도 된다.
+            if not folder.is_dir():
+                die(f"폴더가 없습니다: {folder} (--session은 이미 돌고 있는 봇의 폴더에만)")
+            ids = channel_id_of(folder)
+            cid = a.channel_id or (ids[0] if len(ids) == 1 else "")
+            e.update(tool=tool_of_engine(a.engine), mode="bot", session=a.session,
+                     folder=str(folder), bot="", channel_id=cid)
+        else:
+            folder.mkdir(parents=True, exist_ok=True)
+            e.update(tool=tool_of_engine(a.engine), mode="folder", folder=str(folder))
     r["employees"] = [x for x in r["employees"] if x["name"] != a.name] + [e]
     save_roster(root, r)
     print(f"직원 등록: {e['dept']} / {e['name']} [{e['tool']}/{e['mode']}]" + (f" 채널 {e['channel_id']}" if e["channel_id"] else ""))
@@ -417,10 +427,12 @@ def cmd_doctor(a) -> None:
             folder = Path(e["folder"]).expanduser()
             fname, _ = directive_file(e["tool"])
             block_ok = (folder / fname).exists() and MARK_START in (folder / fname).read_text(encoding="utf-8")
-            reg = e["bot"] in bots
-            (ok if folder.is_dir() and block_ok and reg and e["channel_id"] else bad)(
+            external = e["bot"] == ""  # --session으로 등록한 외부 봇: bots.json·채널 ID를 요구하지 않는다
+            reg = external or e["bot"] in bots
+            healthy = folder.is_dir() and block_ok and reg and (external or e["channel_id"])
+            (ok if healthy else bad)(
                 f"{d}/{e['name']} [{e['tool']}] 폴더={'있음' if folder.is_dir() else '없음'} 지침블록={'있음' if block_ok else '없음'} "
-                f"bots.json={'등록' if reg else '미등록'} 채널={e['channel_id'] or '없음'} 세션={e['session']}")
+                f"bots.json={'외부(--session)' if external else ('등록' if reg else '미등록')} 채널={e['channel_id'] or '없음'} 세션={e['session']}")
     for row in task_rows():
         if row.get("state") in ("stale", "gone"):
             warn(f"업무 {row.get('task_id')} 세션 {row.get('session')}: {row.get('state')} — 재배정 또는 `agentlayer task done`")
@@ -459,6 +471,7 @@ def main() -> None:
     ep.add_argument("--folder", help="새 부서 폴더(봇은 나중에 configure-bot으로)")
     ep.add_argument("--engine", choices=["claude", "codex", "agy", "gemini"], default="claude")
     ep.add_argument("--on-demand", action="store_true", help="호출형(폴더·봇 없음)")
+    ep.add_argument("--session", help="--folder와 함께: folder-bot 밖에서 도는 봇(LaunchAgent·브리지)의 tmux 세션 — 외부 봇 등록")
     ep.add_argument("--channel-id")
     ep.add_argument("--replace", action="store_true")
     ep.set_defaults(fn=cmd_employee)

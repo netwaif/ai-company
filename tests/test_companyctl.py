@@ -396,3 +396,21 @@ def test_doctor_ok_when_manager_bot_registered(env, tmp_path):
     write_bots_json(env, {"company": {"engine": "claude", "folder": str(root), "session": "company-bot"}})
     r = run(env, "doctor", "--root", str(root))
     assert "OK   총괄 봇: company (세션 company-bot)" in r.stdout
+
+
+def test_employee_add_external_session_bot(env, tmp_path):
+    root = _init(env, tmp_path)
+    folder = tmp_path / "discord"
+    folder.mkdir()
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "커뮤니티·멤버십팀", "--name", "시청자 지원",
+            "--folder", str(folder), "--engine", "claude", "--session", "claude-discord")
+    assert r.returncode == 0, r.stderr
+    e = json.loads((root / "직원명부.json").read_text())["employees"][0]
+    assert e["mode"] == "bot" and e["bot"] == "" and e["session"] == "claude-discord" and e["channel_id"] == ""
+    assert e["folder"] == str(folder.resolve())
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "크리에이티브팀", "--name", "비주얼",
+            "--folder", str(tmp_path / "nope"), "--engine", "codex", "--session", "codex-live")
+    assert r.returncode != 0 and "폴더가 없습니다" in r.stderr
+    run(env, "install", "--root", str(root))
+    r = run(env, "doctor", "--root", str(root))
+    assert "OK   커뮤니티·멤버십팀/시청자 지원" in r.stdout and "외부(--session)" in r.stdout and "FAIL" not in r.stdout

@@ -36,6 +36,7 @@ python3 "<이 스킬 폴더>/generator/companyctl.py" init --root <루트> --nam
 먼저 `python3 - <<'EOF'` 없이 `cat ~/.config/folder-bot/bots.json`으로 기존 봇 이름·폴더를 읽어 표로 보여 준다(토큰 없음, 읽어도 됨). 부서마다 세 가지 중 하나를 고르게 한다:
 - **기존 봇**: `companyctl employee add --root <루트> --dept <부서> --name <직원명> --bot <bots.json 이름>` — 채널 ID는 그 봇 폴더의 `.discord-state/access.json`에서 자동으로 읽는다(둘 이상이면 `--channel-id`).
 - **새 폴더 + 새 봇**: `companyctl employee add ... --folder <새 폴더> --engine claude|codex|agy` → 그 폴더에서 folder-bot의 **configure-bot** 스킬로 봇을 만든 뒤(포탈 수동 단계 포함) `companyctl employee add ... --bot <새 봇 이름> --replace`로 갱신.
+- **folder-bot 밖에서 도는 봇**(LaunchAgent로 직접 띄운 Claude 봇, codex-discord 브리지 봇): `companyctl employee add ... --folder <봇 폴더> --engine claude|codex|agy --session <tmux 세션> [--channel-id <ID>]` — 총괄은 스레드 없이 그 세션에 직접 보낸다(`agentlayer status`의 SESSION 열 이름).
 - **호출형**: `companyctl employee add ... --on-demand` — 폴더·봇 없음, 총괄이 필요할 때 `claude -p`로 처리.
 경영기획실(총괄)은 직원으로 등록하지 않는다 — 회사 루트 자체가 총괄 봇 폴더다.
 
