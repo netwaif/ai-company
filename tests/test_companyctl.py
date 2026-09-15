@@ -1,7 +1,7 @@
 import json
 import shutil
 from pathlib import Path
-from conftest import run, write_bots_json, write_access
+from conftest import COMPANYCTL, run, write_bots_json, write_access
 
 
 def test_help_runs(env):
@@ -276,7 +276,7 @@ def test_doctor_ok_after_install(env, tmp_path):
     run(env, "install", "--root", str(root))
     r = run(env, "doctor", "--root", str(root))
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "OK   agentlayer v1.5.0" in r.stdout and "FAIL" not in r.stdout
+    assert "OK   agentlayer v1.6.0" in r.stdout and "FAIL" not in r.stdout
     assert "WARN 콘텐츠전략팀" in r.stdout      # 직원 없는 부서는 경고(호출형)
 
 
@@ -288,7 +288,7 @@ def test_doctor_fails_on_old_agentlayer_and_missing_block(env, tmp_path):
     shim.write_text('#!/bin/sh\ncase "$1" in version) echo "agentlayer v1.4.5 (commit x, 2026-09-14)";; task) echo "[]";; esac\n')
     r = run(env, "doctor", "--root", str(root))
     assert r.returncode == 1
-    assert "FAIL agentlayer" in r.stdout and "1.5.0" in r.stdout
+    assert "FAIL agentlayer" in r.stdout and "1.6.0" in r.stdout
     assert "FAIL 회사 CLAUDE.md" in r.stdout
 
 
@@ -296,7 +296,7 @@ def test_doctor_warns_stale_assignments(env, tmp_path):
     root = _init(env, tmp_path)
     run(env, "install", "--root", str(root))
     shim = Path(env["PATH"].split(":")[0]) / "agentlayer"
-    shim.write_text('#!/bin/sh\ncase "$1" in version) echo "agentlayer v1.5.0 (commit x, 2026-09-14)";; task) echo \'[{"task_id":"T-1","session":"s","state":"stale"}]\';; esac\n')
+    shim.write_text('#!/bin/sh\ncase "$1" in version) echo "agentlayer v1.6.0 (commit x, 2026-09-14)";; task) echo \'[{"task_id":"T-1","session":"s","state":"stale"}]\';; esac\n')
     r = run(env, "doctor", "--root", str(root))
     assert "WARN 업무 T-1" in r.stdout and "stale" in r.stdout
 
@@ -338,7 +338,7 @@ def test_doctor_without_roster_warns_and_exits_zero(env, tmp_path):
     root = tmp_path / "empty"
     r = run(env, "doctor", "--root", str(root))
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "OK   agentlayer v1.5.0" in r.stdout
+    assert "OK   agentlayer v1.6.0" in r.stdout
     assert "WARN 직원명부 없음" in r.stdout
 
 
@@ -414,3 +414,34 @@ def test_employee_add_external_session_bot(env, tmp_path):
     run(env, "install", "--root", str(root))
     r = run(env, "doctor", "--root", str(root))
     assert "OK   커뮤니티·멤버십팀/시청자 지원" in r.stdout and "외부(--session)" in r.stdout and "FAIL" not in r.stdout
+
+
+# --- v0.2: parents(선후 관계) 템플릿·doctor 검사 ---
+
+def test_task_template_has_parents(env, tmp_path):
+    root = tmp_path / "company"
+    run(env, "init", "--root", str(root), "--name", "T")
+    run(env, "install", "--root", str(root))
+    tpl = (root / "_templates" / "task.md").read_text()
+    assert "parents: []" in tpl
+    assert "status: pending" in tpl
+
+
+def test_doctor_warns_on_broken_parent(env, tmp_path):
+    root = tmp_path / "company"
+    run(env, "init", "--root", str(root), "--name", "T")
+    run(env, "install", "--root", str(root))
+    d = root / "tasks" / "B"
+    d.mkdir(parents=True)
+    (d / "task.md").write_text("# B\n```yaml\nstatus: pending\nparents: [A]\n```\n")
+    out = run(env, "doctor", "--root", str(root)).stdout
+    assert "WARN" in out and "B" in out and "A" in out
+
+
+def test_doctor_requires_agentlayer_1_6():
+    import sys
+    sys.path.insert(0, str(COMPANYCTL.parent))
+    import companyctl  # 실제 import 경로는 conftest.py의 COMPANYCTL을 따른다
+    assert companyctl.version_ok("agentlayer 1.6.0 (abc)") is True
+    assert companyctl.version_ok("agentlayer 1.5.0 (abc)") is False
+    assert companyctl.version_ok("agentlayer 2.0.0") is True

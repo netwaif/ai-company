@@ -270,8 +270,14 @@ def cmd_install(a) -> None:
         (root / d).mkdir(parents=True, exist_ok=True)
     for t in TEMPLATES:
         dst = root / "_templates" / t
-        if not dst.exists():
-            dst.write_text((ASSETS / t).read_text(encoding="utf-8"), encoding="utf-8")
+        content = (ASSETS / t).read_text(encoding="utf-8")
+        if t == "task.md":
+            # task.md는 엔진 소유 템플릿 — 매 install마다 최신으로 갱신한다(기존 tasks/*/task.md는 건드리지 않음).
+            if not dst.exists() or dst.read_text(encoding="utf-8") != content:
+                dst.write_text(content, encoding="utf-8")
+                done.append(f"템플릿 갱신: {dst}")
+        elif not dst.exists():
+            dst.write_text(content, encoding="utf-8")
             done.append(f"템플릿: {dst}")
     sess = root / "SESSION.md"
     if not sess.exists():
@@ -335,6 +341,20 @@ def which(name: str):
     return shutil.which(name)
 
 
+MIN_AGENTLAYER = (1, 6, 0)
+MIN_AGENTLAYER_STR = "1.6.0"
+
+
+def parse_version(text: str):
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", text)
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def version_ok(text: str) -> bool:
+    ver = parse_version(text)
+    return ver is not None and ver >= MIN_AGENTLAYER
+
+
 def check_agentlayer() -> tuple:
     exe = which("agentlayer")
     if not exe:
@@ -343,12 +363,11 @@ def check_agentlayer() -> tuple:
         out = subprocess.run([exe, "version"], capture_output=True, text=True, timeout=10).stdout
     except (OSError, subprocess.TimeoutExpired) as ex:
         return (False, f"agentlayer version 실행 실패: {ex}")
-    m = re.search(r"v(\d+)\.(\d+)\.(\d+)", out)
-    if not m:
+    ver = parse_version(out)
+    if ver is None:
         return (False, f"agentlayer 버전 해석 실패: {out.strip()}")
-    ver = tuple(int(x) for x in m.groups())
-    if ver < (1, 5, 0):
-        return (False, f"agentlayer v{'.'.join(map(str, ver))} — 1.5.0 이상 필요(brew upgrade netwaif/tap/agentlayer && agentlayer init)")
+    if not version_ok(out):
+        return (False, f"agentlayer v{'.'.join(map(str, ver))} — {MIN_AGENTLAYER_STR} 이상 필요(brew upgrade netwaif/tap/agentlayer && agentlayer init)")
     return (True, f"agentlayer v{'.'.join(map(str, ver))}")
 
 
@@ -362,6 +381,38 @@ def task_rows() -> list:
         return rows if isinstance(rows, list) else []
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return []
+
+
+def parse_parents(text: str) -> list:
+    """```yaml``` 블록의 parents: 를 읽는다. `parents: [A, B]` 한 줄 형태와
+    `parents:\\n- A\\n- B` 여러 줄 리스트 형태를 모두 받는다(외부 yaml 의존 없음)."""
+    m = re.search(r"^parents:\s*\[(.*?)\]\s*$", text, re.M)
+    if m:
+        inner = m.group(1).strip()
+        return [p.strip().strip("'\"") for p in inner.split(",") if p.strip()] if inner else []
+    m = re.search(r"^parents:\s*$\n((?:^[ \t]*-[ \t]*\S.*$\n?)*)", text, re.M)
+    if m:
+        out = []
+        for ln in m.group(1).splitlines():
+            s = ln.strip()
+            if s.startswith("-"):
+                out.append(s[1:].strip().strip("'\""))
+        return out
+    return []
+
+
+def broken_parents(root: Path) -> list:
+    tasks_dir = root / "tasks"
+    if not tasks_dir.is_dir():
+        return []
+    known = {p.name for p in tasks_dir.iterdir() if p.is_dir()}
+    out = []
+    for d in sorted(tasks_dir.glob("*/task.md")):
+        tid = d.parent.name
+        for parent in parse_parents(d.read_text(encoding="utf-8")):
+            if parent not in known:
+                out.append(f"tasks/{tid}: parents에 없는 업무 {parent}")
+    return out
 
 
 def active_tasks(root: Path) -> int:
@@ -436,6 +487,8 @@ def cmd_doctor(a) -> None:
     for row in task_rows():
         if row.get("state") in ("stale", "gone"):
             warn(f"업무 {row.get('task_id')} 세션 {row.get('session')}: {row.get('state')} — 재배정 또는 `agentlayer task done`")
+    for m in broken_parents(root):
+        warn(m)
     ok(f"활성 업무(tasks/): {active_tasks(root)}건")
     print("\n".join(lines))
     sys.exit(1 if fail else 0)

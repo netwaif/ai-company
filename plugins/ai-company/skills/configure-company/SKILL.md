@@ -17,7 +17,7 @@ description: Use when the user wants to build or operate an "AI company" on top 
 ```bash
 python3 "<이 스킬 폴더>/generator/companyctl.py" doctor --root <회사 루트>
 ```
-- agentlayer ≥ 1.5.0(`agentlayer version`). 없거나 낮으면: `brew install netwaif/tap/agentlayer && agentlayer init`(리눅스: README의 install.sh). 그 뒤 반드시 `agentlayer init`.
+- agentlayer ≥ 1.6.0(`agentlayer version`). 없거나 낮으면: `brew install netwaif/tap/agentlayer && agentlayer init`(리눅스: README의 install.sh). 그 뒤 반드시 `agentlayer init`.
 - folder-bot 플러그인(`bot-thread`·`bot-up`가 `~/.local/bin`에 있음). 없으면 `/plugin marketplace add netwaif/folder-bot`, `/plugin install folder-bot@folder-bot` 안내 후 중단.
 - tmux.
 
@@ -53,13 +53,13 @@ python3 "<이 스킬 폴더>/generator/companyctl.py" install --root <루트>
 ```bash
 python3 "<이 스킬 폴더>/generator/companyctl.py" doctor --root <루트>
 ```
-FAIL이 없으면 무해한 사슬 한 번: 총괄 채널(또는 회사 루트의 claude 세션)에서 "직원 <이름>에게 '도구 없이 OK라고만 답해'를 업무 LAB-1로 보내고 보고를 기다려 줘". 총괄 절차대로 스레드 생성(`bot-thread open`) → `bot-thread ensure`(창·세션 생성, 준비까지 최대 60초; 출력은 에이전트 이름이며 창 이름이 아님) → `task assign` → `send` → Monitor 이벤트 `to: DONE_UNREAD`가 오면 성공. 결과를 사용자에게 그대로 보여 준다.
+FAIL이 없으면 무해한 사슬 한 번: 총괄 채널(또는 회사 루트의 claude 세션)에서 "직원 <이름>에게 '도구 없이 OK라고만 답해'를 업무 LAB-1로 보내고 보고를 기다려 줘". 총괄 절차대로 스레드 생성(`bot-thread open`) → `bot-thread ensure`(창·세션 생성, 준비까지 최대 60초; 출력은 에이전트 이름이며 창 이름이 아님) → `task assign` → `send` → Monitor 이벤트 `to: DONE_UNREAD`가 오면 성공. 결과를 사용자에게 그대로 보여 준다. LAB-1 뒤에 `tasks/LAB-2/task.md`를 `parents: [LAB-1]`로 만들고 `agentlayer task done LAB-1` → Monitor에 `to: READY, task_id: LAB-2`가 오면 선후 관계까지 성공. `agentlayer board`로 보드를 연다.
 
 ## 직원 추가·제거 / 부서 추가·제거
 `companyctl employee add|remove`, `companyctl dept add|remove` 뒤 반드시 `companyctl install`(블록 갱신). 직원 제거는 명부에서만 빼며 그 폴더의 블록은 `install`이 다시 돌 때 유지된다 — 블록까지 걷으려면 먼저 `companyctl remove`, 명부 수정, `install`.
 
 ## 점검
-`companyctl doctor --root <루트>` — 읽기 전용. agentlayer 버전·도구·명부·총괄 블록·수신함·직원별 폴더/블록/등록/채널·낡은 업무(`stale`·`gone`)·활성 업무 수.
+`companyctl doctor --root <루트>` — 읽기 전용. agentlayer 버전·도구·명부·총괄 블록·수신함·직원별 폴더/블록/등록/채널·낡은 업무(`stale`·`gone`)·parents 끊긴 참조(WARN)·활성 업무 수.
 
 ## 제거
 `companyctl remove --root <루트>` — 총괄·직원 지침 블록만 걷어낸다. 직원명부·SESSION.md·업무요청·결과물·tasks·runtime은 보존(삭제는 사용자 몫). 총괄 봇 자체는 folder-bot의 제거 절차.

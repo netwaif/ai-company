@@ -4,7 +4,10 @@
 
 ```yaml
 status: pending
-# pending | in_progress | waiting_<직원> | reviewing | done
+# pending | in_progress | waiting_<세션> | reviewing | done  (agentlayer가 자동 갱신 — 손으로 고치지 말 것)
+# 보드 열: todo=pending(부모 미완) ready=pending(부모 전부 done) running=in_progress blocked=waiting_* review=reviewing done=done
+parents: []
+# 선행 업무ID 목록. 예: parents: [VIDEO-07-TOPICS]. 전부 done이면 총괄 수신함에 READY 이벤트가 온다.
 created: <YYYY-MM-DD>
 updated: <YYYY-MM-DD>
 priority: medium

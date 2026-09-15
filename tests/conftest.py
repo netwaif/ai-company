@@ -10,7 +10,7 @@ import pytest
 COMPANYCTL = Path(__file__).parent.parent / "plugins/ai-company/skills/configure-company/generator/companyctl.py"
 
 FAKES = {
-    "agentlayer": '#!/bin/sh\ncase "$1" in\n  version) echo "agentlayer v1.5.0 (commit abc1234, 2026-09-14)";;\n  task) echo "[]";;\n  *) echo "fake agentlayer $*";;\nesac\n',
+    "agentlayer": '#!/bin/sh\ncase "$1" in\n  version) echo "agentlayer v1.6.0 (commit abc1234, 2026-09-14)";;\n  task) echo "[]";;\n  *) echo "fake agentlayer $*";;\nesac\n',
     "bot-thread": '#!/bin/sh\necho "fake bot-thread $*"\n',
     "bot-up": '#!/bin/sh\necho "fake bot-up $*"\n',
     "tmux": '#!/bin/sh\necho "fake tmux $*"\n',
