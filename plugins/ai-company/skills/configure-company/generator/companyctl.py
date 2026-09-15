@@ -346,7 +346,10 @@ MIN_AGENTLAYER_STR = "1.6.0"
 
 
 def parse_version(text: str):
-    m = re.search(r"(\d+)\.(\d+)\.(\d+)", text)
+    """첫 줄만 본다 — `agentlayer version`의 둘째 줄(`go1.25.7 darwin/amd64`)의 Go 툴체인 버전을
+    agentlayer 버전으로 잘못 집지 않기 위함."""
+    first_line = text.splitlines()[0] if text.strip() else ""
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", first_line)
     return tuple(int(x) for x in m.groups()) if m else None
 
 
@@ -356,19 +359,22 @@ def version_ok(text: str) -> bool:
 
 
 def check_agentlayer() -> tuple:
+    """(status, msg)를 돌려준다. status는 'ok' | 'warn' | 'fail'."""
     exe = which("agentlayer")
     if not exe:
-        return (False, "agentlayer 없음 — brew install netwaif/tap/agentlayer && agentlayer init")
+        return ("fail", "agentlayer 없음 — brew install netwaif/tap/agentlayer && agentlayer init")
     try:
         out = subprocess.run([exe, "version"], capture_output=True, text=True, timeout=10).stdout
     except (OSError, subprocess.TimeoutExpired) as ex:
-        return (False, f"agentlayer version 실행 실패: {ex}")
-    ver = parse_version(out)
+        return ("fail", f"agentlayer version 실행 실패: {ex}")
+    first_line = out.splitlines()[0].strip() if out.strip() else ""
+    ver = parse_version(first_line)
     if ver is None:
-        return (False, f"agentlayer 버전 해석 실패: {out.strip()}")
-    if not version_ok(out):
-        return (False, f"agentlayer v{'.'.join(map(str, ver))} — {MIN_AGENTLAYER_STR} 이상 필요(brew upgrade netwaif/tap/agentlayer && agentlayer init)")
-    return (True, f"agentlayer v{'.'.join(map(str, ver))}")
+        # 개발 빌드(`agentlayer dev (commit ...+dirty, ...)`)는 semver가 없다 — 메인테이너 머신을 막지 않는다.
+        return ("warn", f"agentlayer 개발 빌드(버전 확인 불가): {first_line}")
+    if not version_ok(first_line):
+        return ("fail", f"agentlayer v{'.'.join(map(str, ver))} — {MIN_AGENTLAYER_STR} 이상 필요(brew upgrade netwaif/tap/agentlayer && agentlayer init)")
+    return ("ok", f"agentlayer v{'.'.join(map(str, ver))}")
 
 
 def task_rows() -> list:
@@ -452,8 +458,8 @@ def cmd_doctor(a) -> None:
         fail = True
         lines.append("FAIL " + m)
 
-    good, msg = check_agentlayer()
-    (ok if good else bad)(msg)
+    status, msg = check_agentlayer()
+    {"ok": ok, "warn": warn, "fail": bad}[status](msg)
     for tool in ("bot-thread", "bot-up", "tmux"):
         (ok if which(tool) else bad)(f"{tool}: {which(tool) or '없음 — folder-bot 플러그인/tmux 설치'}")
     (ok if bots_json_path().exists() else warn)(f"folder-bot bots.json: {bots_json_path()}")

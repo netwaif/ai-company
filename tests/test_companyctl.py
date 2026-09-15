@@ -507,3 +507,35 @@ def test_doctor_ignores_commented_out_parents_line(env, tmp_path):
     (d / "task.md").write_text("# E\n```yaml\nstatus: pending\n# parents: [Z]\nparents: []\n```\n")
     out = run(env, "doctor", "--root", str(root)).stdout
     assert "parents에 없는 업무" not in out
+
+
+# --- v0.2 리뷰 수정 2: agentlayer version 둘째 줄(Go 툴체인)을 버전으로 착각하면 안 된다 ---
+
+def test_version_ok_ignores_go_toolchain_second_line():
+    companyctl = _load_companyctl()
+    assert companyctl.version_ok("agentlayer 1.6.0 (commit abc)\ngo1.25.7 darwin/amd64") is True
+    assert companyctl.parse_version("agentlayer dev (commit 02b2579+dirty, 2026-09-15)\ngo1.25.7 darwin/amd64") is None
+
+
+def test_doctor_warns_on_dev_build_agentlayer(env, tmp_path):
+    root = _init(env, tmp_path)
+    shim = Path(env["PATH"].split(":")[0]) / "agentlayer"
+    shim.write_text('#!/bin/sh\ncase "$1" in\n'
+                     '  version) printf "agentlayer dev (commit 02b2579+dirty, 2026-09-15)\\ngo1.25.7 darwin/amd64\\n";;\n'
+                     '  task) echo "[]";;\n'
+                     'esac\n')
+    r = run(env, "doctor", "--root", str(root))
+    assert "WARN agentlayer 개발 빌드(버전 확인 불가)" in r.stdout
+    assert "OK   agentlayer" not in r.stdout
+    assert "FAIL agentlayer" not in r.stdout
+
+
+def test_doctor_ok_when_agentlayer_version_has_go_toolchain_second_line(env, tmp_path):
+    root = _init(env, tmp_path)
+    shim = Path(env["PATH"].split(":")[0]) / "agentlayer"
+    shim.write_text('#!/bin/sh\ncase "$1" in\n'
+                     '  version) printf "agentlayer 1.6.0 (commit abc, 2026-09-15)\\ngo1.25.7 darwin/amd64\\n";;\n'
+                     '  task) echo "[]";;\n'
+                     'esac\n')
+    r = run(env, "doctor", "--root", str(root))
+    assert "OK   agentlayer v1.6.0" in r.stdout
