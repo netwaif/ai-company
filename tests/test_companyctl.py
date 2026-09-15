@@ -438,10 +438,72 @@ def test_doctor_warns_on_broken_parent(env, tmp_path):
     assert "WARN" in out and "B" in out and "A" in out
 
 
+def _load_companyctl():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("companyctl_under_test", COMPANYCTL)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_doctor_requires_agentlayer_1_6():
-    import sys
-    sys.path.insert(0, str(COMPANYCTL.parent))
-    import companyctl  # 실제 import 경로는 conftest.py의 COMPANYCTL을 따른다
+    companyctl = _load_companyctl()
     assert companyctl.version_ok("agentlayer 1.6.0 (abc)") is True
     assert companyctl.version_ok("agentlayer 1.5.0 (abc)") is False
     assert companyctl.version_ok("agentlayer 2.0.0") is True
+
+
+# --- v0.2 리뷰 수정: parents 파싱이 yaml 주석·따옴표를 견뎌야 한다 ---
+
+def test_parse_parents_strips_trailing_comments_and_quotes():
+    companyctl = _load_companyctl()
+    assert companyctl.parse_parents("parents: [A, B]  # 선행 업무\n") == ["A", "B"]
+    assert companyctl.parse_parents("parents: ['A', \"B\"]\n") == ["A", "B"]
+    assert companyctl.parse_parents("parents:\n- A  # 설명\n- B\n") == ["A", "B"]
+    assert companyctl.parse_parents("# parents: [Z]\nstatus: pending\n") == []
+
+
+def test_doctor_warns_on_broken_parent_bracket_with_comment(env, tmp_path):
+    root = tmp_path / "company"
+    run(env, "init", "--root", str(root), "--name", "T")
+    run(env, "install", "--root", str(root))
+    d = root / "tasks" / "B"
+    d.mkdir(parents=True)
+    (d / "task.md").write_text("# B\n```yaml\nstatus: pending\nparents: [A]  # 선행 업무\n```\n")
+    out = run(env, "doctor", "--root", str(root)).stdout
+    assert "WARN tasks/B: parents에 없는 업무 A" in out
+
+
+def test_doctor_no_warn_for_valid_parent_with_trailing_comment(env, tmp_path):
+    root = tmp_path / "company"
+    run(env, "init", "--root", str(root), "--name", "T")
+    run(env, "install", "--root", str(root))
+    (root / "tasks" / "A").mkdir(parents=True)
+    d = root / "tasks" / "C"
+    d.mkdir(parents=True)
+    (d / "task.md").write_text("# C\n```yaml\nstatus: pending\nparents: [A]  # 선행 업무\n```\n")
+    out = run(env, "doctor", "--root", str(root)).stdout
+    assert "parents에 없는 업무" not in out
+
+
+def test_doctor_warns_multiline_parent_with_trailing_comment_parses_clean(env, tmp_path):
+    root = tmp_path / "company"
+    run(env, "init", "--root", str(root), "--name", "T")
+    run(env, "install", "--root", str(root))
+    d = root / "tasks" / "D"
+    d.mkdir(parents=True)
+    (d / "task.md").write_text("# D\n```yaml\nstatus: pending\nparents:\n- A  # 설명\n```\n")
+    out = run(env, "doctor", "--root", str(root)).stdout
+    assert "WARN tasks/D: parents에 없는 업무 A" in out
+    assert "설명" not in out
+
+
+def test_doctor_ignores_commented_out_parents_line(env, tmp_path):
+    root = tmp_path / "company"
+    run(env, "init", "--root", str(root), "--name", "T")
+    run(env, "install", "--root", str(root))
+    d = root / "tasks" / "E"
+    d.mkdir(parents=True)
+    (d / "task.md").write_text("# E\n```yaml\nstatus: pending\n# parents: [Z]\nparents: []\n```\n")
+    out = run(env, "doctor", "--root", str(root)).stdout
+    assert "parents에 없는 업무" not in out

@@ -383,9 +383,25 @@ def task_rows() -> list:
         return []
 
 
+def _strip_yaml_comment(line: str) -> str:
+    """yaml 줄 주석 제거: 줄 선두(공백 제외) `#`는 줄 전체를 지우고, 그 외 ` #`(공백+해시) 이후는 잘라낸다."""
+    if line.lstrip().startswith("#"):
+        return ""
+    idx = line.find(" #")
+    if idx != -1:
+        line = line[:idx]
+    return line.rstrip()
+
+
+def _decomment(text: str) -> str:
+    return "\n".join(_strip_yaml_comment(ln) for ln in text.splitlines())
+
+
 def parse_parents(text: str) -> list:
     """```yaml``` 블록의 parents: 를 읽는다. `parents: [A, B]` 한 줄 형태와
-    `parents:\\n- A\\n- B` 여러 줄 리스트 형태를 모두 받는다(외부 yaml 의존 없음)."""
+    `parents:\\n- A\\n- B` 여러 줄 리스트 형태를 모두 받는다(외부 yaml 의존 없음).
+    줄 끝 ` # 주석`과 줄 전체 `# ...` 주석은 매칭 전에 제거하고, ID를 감싼 따옴표는 벗겨낸다."""
+    text = _decomment(text)
     m = re.search(r"^parents:\s*\[(.*?)\]\s*$", text, re.M)
     if m:
         inner = m.group(1).strip()
