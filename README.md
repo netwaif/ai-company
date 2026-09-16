@@ -19,7 +19,7 @@ brew install netwaif/tap/agentlayer && agentlayer init        # 있으면 brew u
 AI 회사 만들어줘
 ```
 
-스킬(configure-company)이 전 과정을 이끈다 — 회사 루트·부서·직원(기존 봇 / 새 폴더 / 호출형)을 묻고, 결정적 엔진 `companyctl`이
+회사 폴더를 먼저 폴더 봇으로 만들어 두었어도 되고 나중에 만들어도 된다(먼저 만들었으면 설치가 봇을 재시작한다). 스킬(configure-company)이 전 과정을 이끈다 — 회사 루트·부서·직원(기존 봇 / 새 폴더 / 호출형)을 묻고, 결정적 엔진 `companyctl`이
 폴더·템플릿·총괄 절차·직원 지침 블록을 멱등 설치한다. 수동은 총괄 봇의 디스코드 포탈 단계뿐(folder-bot의 configure-bot이 안내).
 
 **총괄 역할은 Claude Code 전용**(Monitor·SendMessage 의존). 직원은 Claude·Codex·Gemini(agy) 봇 모두 가능. 맥·리눅스·WSL2.

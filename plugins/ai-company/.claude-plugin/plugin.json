@@ -1,6 +1,6 @@
 {
   "name": "ai-company",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "AI 회사 생성기. 직원명부(직원명부.json) 정본으로 회사 루트·공동 규칙·총괄 절차·직원 지침 블록을 멱등 관리. agentlayer ≥1.6.0(send·task·훅 보고·parents·보드)과 folder-bot(봇·스레드) 위에서 동작한다.",
   "author": { "name": "netwaif" }
 }
