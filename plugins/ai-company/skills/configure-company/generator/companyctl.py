@@ -154,9 +154,51 @@ def tool_of_engine(engine: str) -> str:
     return {"claude": "claude", "codex": "codex", "agy": "gemini", "gemini": "gemini"}.get(engine, engine)
 
 
+def parse_env_file(path: Path) -> dict:
+    """codex-discord 브리지 .env(KEY=VALUE, # 주석, 따옴표 허용)를 읽는다. 토큰 값은 쓰지 않고 버린다."""
+    out = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        k = k.strip().removeprefix("export ").strip()
+        v = v.strip().strip('"').strip("'")
+        out[k] = v
+    return {k: v for k, v in out.items() if not k.endswith("TOKEN")}
+
+
+def apply_env_file(a) -> None:
+    """--env-file <브리지 .env>: 세션(TUI_PANE)·채널(TUI_CHANNEL_ID)·폴더(CODEX_WORKDIR)·엔진(ENGINE)을
+    채운다. 명시 인자가 우선. 라이브 TUI 모드가 아니면(TUI_PANE 없음) 직원이 될 수 없다 — 총괄이 보낼
+    tmux pane이 없기 때문."""
+    p = Path(a.env_file).expanduser()
+    if not p.is_file():
+        die(f"env 파일이 없습니다: {p}")
+    env = parse_env_file(p)
+    pane = env.get("TUI_PANE", "")
+    if not a.session:
+        if not pane:
+            die(f"{p.name}에 TUI_PANE이 없습니다 — 헤드리스 브리지는 직원이 될 수 없습니다(총괄이 보낼 tmux pane 없음). "
+                f"TUI_PANE(예: gemini-live:0.0)·TUI_CHANNEL_ID를 넣고 `bash scripts/install.sh`를 재실행(codex-discord v0.1.22+, 자동 기동 유닛)한 뒤 다시 하세요")
+        a.session = pane.split(":", 1)[0]
+    if not a.channel_id:
+        a.channel_id = env.get("TUI_CHANNEL_ID", "")
+    if not a.folder:
+        a.folder = env.get("CODEX_WORKDIR", "")
+        if not a.folder:
+            die(f"{p.name}에 CODEX_WORKDIR이 없습니다 — --folder로 지정")
+    if not a.engine:
+        a.engine = env.get("ENGINE", "codex") or "codex"
+
+
 def cmd_employee(a) -> None:
     root = Path(a.root).expanduser().resolve()
     r = load_roster(root)
+    if a.action == "add" and getattr(a, "env_file", None):
+        apply_env_file(a)
+    if a.action == "add" and not getattr(a, "engine", None):
+        a.engine = "claude"
     if a.action == "remove":
         before = len(r["employees"])
         r["employees"] = [e for e in r["employees"] if e["name"] != a.name]
@@ -544,9 +586,10 @@ def main() -> None:
     ep.add_argument("--dept")
     ep.add_argument("--bot", help="folder-bot bots.json의 봇 이름(기존 봇 등록)")
     ep.add_argument("--folder", help="새 부서 폴더(봇은 나중에 configure-bot으로)")
-    ep.add_argument("--engine", choices=["claude", "codex", "agy", "gemini"], default="claude")
+    ep.add_argument("--engine", choices=["claude", "codex", "agy", "gemini"], default=None, help="기본 claude(--env-file이면 그 ENGINE, 없으면 codex)")
     ep.add_argument("--on-demand", action="store_true", help="호출형(폴더·봇 없음)")
     ep.add_argument("--session", help="--folder와 함께: folder-bot 밖에서 도는 봇(LaunchAgent·브리지)의 tmux 세션 — 외부 봇 등록")
+    ep.add_argument("--env-file", help="codex-discord 브리지 .env(.gemini) 경로 — TUI_PANE→세션, TUI_CHANNEL_ID→채널, CODEX_WORKDIR→폴더, ENGINE→엔진을 읽어 외부 봇으로 등록(라이브 TUI 모드 필수)")
     ep.add_argument("--channel-id")
     ep.add_argument("--replace", action="store_true")
     ep.set_defaults(fn=cmd_employee)

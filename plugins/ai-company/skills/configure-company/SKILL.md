@@ -37,6 +37,9 @@ python3 "<이 스킬 폴더>/generator/companyctl.py" init --root <루트> --nam
 - **기존 봇**: `companyctl employee add --root <루트> --dept <부서> --name <직원명> --bot <bots.json 이름>` — 채널 ID는 그 봇 폴더의 `.discord-state/access.json`에서 자동으로 읽는다(둘 이상이면 `--channel-id`).
 - **새 폴더 + 새 봇**: `companyctl employee add ... --folder <새 폴더> --engine claude|codex|agy` → 그 폴더에서 folder-bot의 **configure-bot** 스킬로 봇을 만든 뒤(포탈 수동 단계 포함) `companyctl employee add ... --bot <새 봇 이름> --replace`로 갱신.
 - **folder-bot 밖에서 도는 봇**(LaunchAgent로 직접 띄운 Claude 봇, codex-discord 브리지 봇): `companyctl employee add ... --folder <봇 폴더> --engine claude|codex|agy --session <tmux 세션> [--channel-id <ID>]` — 총괄은 스레드 없이 그 세션에 직접 보낸다(`agentlayer status`의 SESSION 열 이름).
+  - **하네스 설치기의 공용 브리지**(`codex-live`, Gemini)를 그대로 직원으로 쓸 때는 값을 손으로 옮기지 말고 `companyctl employee add ... --env-file <브리지 폴더>/.env`(코덱스) 또는 `.env.gemini`(제미나이) — `TUI_PANE`→세션, `TUI_CHANNEL_ID`→채널, `CODEX_WORKDIR`→폴더, `ENGINE`→엔진을 읽는다. 라이브 TUI 모드가 아니면(TUI_PANE 없음) 거부한다: 총괄이 보낼 tmux pane이 없어서다. 설치기 기본 구성은 코덱스만 TUI이므로 제미나이는 `.env.gemini`에 `TUI_PANE=gemini-live:0.0`·`TUI_CHANNEL_ID=<제미나이 채널>`을 넣고 브리지 폴더에서 `bash scripts/install.sh`를 재실행(codex-discord v0.1.22+, 로그인 자동 기동 유닛 `gemini-tui` 등록)한 뒤 등록한다.
+
+**Codex·Gemini 직원의 두 경로**: 직원마다 봇을 따로 두려면 folder-bot **configure-bot**의 `--engine codex|agy`로 봇을 만들고 `--bot`으로 등록한다(전용 채널·자동 기동·라이브 TUI까지 folder-bot이 만든다 — 권장). 이미 하네스 브리지가 돌고 있으면 위 `--env-file`로 그 세션을 그대로 직원으로 쓴다(채널은 기존 코덱스·제미나이 채널). 어느 쪽이든 총괄 절차는 같다(스레드 없이 `task assign <ID> <세션>` → `send <세션> - < 업무요청`).
 - **호출형**: `companyctl employee add ... --on-demand` — 폴더·봇 없음, 총괄이 필요할 때 `claude -p`로 처리.
 경영기획실(총괄)은 직원으로 등록하지 않는다 — 회사 루트 자체가 총괄 봇 폴더다.
 

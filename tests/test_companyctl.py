@@ -539,3 +539,42 @@ def test_doctor_ok_when_agentlayer_version_has_go_toolchain_second_line(env, tmp
                      'esac\n')
     r = run(env, "doctor", "--root", str(root))
     assert "OK   agentlayer v1.6.0" in r.stdout
+
+
+def test_employee_add_from_bridge_env_file(env, tmp_path):
+    root = tmp_path / "c"
+    run(env, "init", "--root", str(root), "--name", "회사")
+    work = tmp_path / "gemini-ws"
+    work.mkdir()
+    envf = tmp_path / ".env.gemini"
+    envf.write_text(
+        "DISCORD_TOKEN=secret\nENGINE=agy\nCODEX_WORKDIR=" + str(work) + "\nTUI_PANE=gemini-live:0.0\nTUI_CHANNEL_ID=777\n",
+        encoding="utf-8")
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "크리에이티브팀", "--name", "이미지 검수 담당",
+            "--env-file", str(envf))
+    assert r.returncode == 0, r.stderr
+    e = json.loads((root / "직원명부.json").read_text())["employees"][0]
+    assert e["tool"] == "gemini" and e["mode"] == "bot" and e["session"] == "gemini-live"
+    assert e["channel_id"] == "777" and e["folder"] == str(work.resolve()) and e["bot"] == ""
+    assert "secret" not in (root / "직원명부.json").read_text()
+    # 명시 인자가 우선
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "크리에이티브팀", "--name", "이미지 검수 담당",
+            "--env-file", str(envf), "--channel-id", "999", "--replace")
+    assert r.returncode == 0, r.stderr
+    assert json.loads((root / "직원명부.json").read_text())["employees"][0]["channel_id"] == "999"
+
+
+def test_employee_add_env_file_requires_live_tui(env, tmp_path):
+    root = tmp_path / "c"
+    run(env, "init", "--root", str(root), "--name", "회사")
+    work = tmp_path / "ws"
+    work.mkdir()
+    envf = tmp_path / ".env.gemini"
+    envf.write_text("ENGINE=agy\nCODEX_WORKDIR=" + str(work) + "\n", encoding="utf-8")
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "크리에이티브팀", "--name", "검수", "--env-file", str(envf))
+    assert r.returncode != 0
+    assert "TUI_PANE" in r.stderr and "install.sh" in r.stderr
+    # 엔진 기본값은 여전히 claude(--env-file 없을 때)
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "크리에이티브팀", "--name", "폴더직원", "--folder", str(tmp_path / "f"))
+    assert r.returncode == 0, r.stderr
+    assert json.loads((root / "직원명부.json").read_text())["employees"][0]["tool"] == "claude"
