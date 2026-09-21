@@ -13,6 +13,7 @@ FAKES = {
     "agentlayer": '#!/bin/sh\ncase "$1" in\n  version) echo "agentlayer v1.6.0 (commit abc1234, 2026-09-14)";;\n  task) echo "[]";;\n  *) echo "fake agentlayer $*";;\nesac\n',
     "bot-thread": '#!/bin/sh\necho "fake bot-thread $*"\n',
     "bot-up": '#!/bin/sh\necho "fake bot-up $*"\n',
+    "bot-restart": '#!/bin/sh\necho "재시작 예약됨: $1 (fake bot-restart)"\n',
     "tmux": '#!/bin/sh\necho "fake tmux $*"\n',
 }
 

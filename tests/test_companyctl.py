@@ -578,3 +578,69 @@ def test_employee_add_env_file_requires_live_tui(env, tmp_path):
     r = run(env, "employee", "add", "--root", str(root), "--dept", "크리에이티브팀", "--name", "폴더직원", "--folder", str(tmp_path / "f"))
     assert r.returncode == 0, r.stderr
     assert json.loads((root / "직원명부.json").read_text())["employees"][0]["tool"] == "claude"
+
+
+def test_employee_add_codex_bot_reads_channel_from_bridge_env(env, tmp_path):
+    """folder-bot --engine codex 봇은 폴더에 .discord-state가 없다(채널은 브리지 .env.<봇>의 TUI_CHANNEL_ID).
+    WSL2 실기 2026-09-21: 스킬이 매번 손으로 우회하던 것을 엔진이 읽는다."""
+    root = _init(env, tmp_path)
+    folder = tmp_path / "work" / "codexlab"
+    folder.mkdir(parents=True)
+    bridge = tmp_path / "bridge"
+    bridge.mkdir()
+    (bridge / ".env.codexlab").write_text("DISCORD_TOKEN=secret\nTUI_PANE=codexlab-bot:0.0\nTUI_CHANNEL_ID=1547979581775151194\n")
+    write_bots_json(env, {"codexlab": {"engine": "codex", "folder": str(folder), "session": "codexlab-bot", "bridge_dir": str(bridge)}})
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "크리에이티브팀", "--name", "비주얼", "--bot", "codexlab")
+    assert r.returncode == 0, r.stderr
+    e = json.loads((root / "직원명부.json").read_text())["employees"][0]
+    assert e["tool"] == "codex" and e["channel_id"] == "1547979581775151194" and e["session"] == "codexlab-bot"
+    assert "secret" not in r.stdout + r.stderr
+
+
+def test_employee_add_codex_bot_without_bridge_env_needs_channel(env, tmp_path):
+    root = _init(env, tmp_path)
+    folder = tmp_path / "work" / "codexlab"
+    folder.mkdir(parents=True)
+    write_bots_json(env, {"codexlab": {"engine": "codex", "folder": str(folder), "session": "codexlab-bot", "bridge_dir": str(tmp_path / "nobridge")}})
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "크리에이티브팀", "--name", "비주얼", "--bot", "codexlab")
+    assert r.returncode != 0 and "--channel-id" in r.stderr and ".env.codexlab" in r.stderr
+
+
+def _company_with_bot(env, tmp_path):
+    root = _init(env, tmp_path)
+    write_bots_json(env, {"company": {"engine": "claude", "folder": str(root), "session": "company-bot"}})
+    return root
+
+
+def test_install_restarts_manager_bot_when_root_is_bot(env, tmp_path):
+    """0.2.4: 회사 루트가 이미 폴더 봇이면 install이 총괄 블록을 설치·갱신한 뒤 스스로 bot-restart를 부른다
+    (LLM 행동 지시가 아니라 엔진 보장 — WSL2 실기 2026-09-21에서 그 줄이 빠졌다)."""
+    root = _company_with_bot(env, tmp_path)
+    r = run(env, "install", "--root", str(root))
+    assert r.returncode == 0, r.stderr
+    assert "총괄 봇 재시작: company-bot" in r.stdout and "fake bot-restart" in r.stdout
+    # 블록이 이미 최신이면 재시작하지 않는다(멱등 — 봇을 괜히 끊지 않음)
+    r = run(env, "install", "--root", str(root))
+    assert r.returncode == 0 and "총괄 봇 재시작:" not in r.stdout
+    # 블록을 지웠다가 다시 깔면 다시 재시작
+    run(env, "remove", "--root", str(root))
+    r = run(env, "install", "--root", str(root))
+    assert "총괄 봇 재시작: company-bot" in r.stdout
+
+
+def test_install_no_restart_flag_and_non_bot_root(env, tmp_path):
+    root = _company_with_bot(env, tmp_path)
+    r = run(env, "install", "--root", str(root), "--no-restart")
+    assert r.returncode == 0 and "총괄 봇 재시작:" not in r.stdout and "재시작 생략" in r.stdout
+    root2 = _init(env, tmp_path / "other")
+    r = run(env, "install", "--root", str(root2))
+    assert r.returncode == 0 and "재시작" not in r.stdout
+
+
+def test_install_warns_when_bot_restart_missing(env, tmp_path):
+    root = _company_with_bot(env, tmp_path)
+    shim = Path(env["PATH"].split(":")[0])
+    (shim / "bot-restart").unlink()
+    env = {**env, "PATH": str(shim)}  # 이 Mac의 진짜 ~/.local/bin/bot-restart가 잡히지 않게
+    r = run(env, "install", "--root", str(root))
+    assert r.returncode == 0 and "WARN" in r.stdout and "bot-restart company-bot" in r.stdout

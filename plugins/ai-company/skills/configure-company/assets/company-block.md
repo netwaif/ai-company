@@ -15,5 +15,5 @@
    - `send`가 "작업 중"·"승인 대기"로 거부되면 기다렸다가 다시 보낸다. `--force`는 쓰지 않는다.
    - **감시**: 배정 직후 감시가 꺼져 있으면 켠다 — Monitor 도구로 `agentlayer task watch {INBOX}`(`timeout_ms` 최대 30분, 이벤트가 한 줄 JSON으로 온다). 만료 알림이 오면 활성 업무가 남아 있을 때만 재기동한다. 업무가 0건인데 감시를 켜 두면 30분마다 빈 재기동에 토큰만 든다.
 4. **수신**: `to`가 `READY`면 `task_id`의 부모가 전부 끝난 것 — 그 업무를 배정한다. Monitor 이벤트의 `to`가 `WAITING`이면 `ask` 문구를 그대로 대표에게 전달한다(승인 대행 금지). 대표의 답(또는 추가 지시)은 `agentlayer send <session>[:창] "<답>"`으로 보낸다 — `tasks/<업무ID>/log.md`에 `[SEND]`로 남아 `[ASK]`와 짝이 된다. `DONE_UNREAD`면 산출물을 읽어 완료 기준과 대조해 다음 직원 배정 또는 대표 보고. `ERROR`면 대표 보고. `task list`에 `stale`·`gone`이 보이면 그 업무는 재배정 대상이다.
-5. **마감**: `agentlayer task done <업무ID>`(task.md를 done으로 닫고 자식 업무의 READY 이벤트를 보낸다), `log.md`에 한 줄, 결과물을 `결과물/<업무ID>/`에 복사·링크. 마감 뒤 `task list`에 활성 업무가 0건이면 감시를 끈다(TaskStop) — 다음 배정 때 다시 켠다.
+5. **마감**: `agentlayer task done <업무ID>`(task.md를 done으로 닫고 자식 업무의 READY 이벤트를 보낸다. 이미 닫힌 부모에 자식을 나중에 붙였으면 같은 명령을 한 번 더 — agentlayer 1.6.6+는 done인 업무에도 자식을 재평가해 READY를 보낸다), `log.md`에 한 줄, 결과물을 `결과물/<업무ID>/`에 복사·링크. 마감 뒤 `task list`에 활성 업무가 0건이면 감시를 끈다(TaskStop) — 다음 배정 때 다시 켠다.
 6. **하지 말 것**: 메인 채널 대화에 개입, 승인 대행, 봇끼리 디스코드 멘션, 명부에 없는 세션에 전송, 직원 폴더의 파일 직접 수정, `tasks/*/task.md`의 `status:` 직접 수정(훅과 충돌).

@@ -27,6 +27,8 @@ python3 "<이 스킬 폴더>/generator/companyctl.py" doctor --root <회사 루�
 - 부서 목록(기본 9부서 — 경영기획실·콘텐츠전략팀·기술개발팀·크리에이티브팀·기술검증팀·교육자료팀·채널그로스팀·커뮤니티·멤버십팀·비즈니스운영팀; 빼거나 추가 가능)
 AskUserQuestion이 없는 환경에서는 채팅으로 같은 질문을 하고 답을 받는다. 기본값으로 질주하지 말 것.
 
+**질문이 취소되면 멈춘다.** 사용자가 폼을 닫거나(`User declined to answer questions`) 답을 비우면 그것은 "기본값 수락"이 아니라 "중단"이다 — 아무것도 만들지 말고(init·employee·install 전부 금지) "질문이 취소돼 아무것도 설치하지 않았습니다. 다시 하려면 말씀해 주세요" 한 줄로 끝낸다. 회사 루트 생성·직원 등록은 되돌리는 비용이 있는 작업이라 추측으로 진행하지 않는다(WSL2 실기 2026-09-21: 폼이 화살표 오조작으로 닫혔는데 기본 9부서 회사가 깔리고 기존 봇들이 직원으로 등록됐다).
+
 ### 3. 회사 루트 생성
 ```bash
 python3 "<이 스킬 폴더>/generator/companyctl.py" init --root <루트> --name "<이름>" [--depts a,b,c]
@@ -34,7 +36,7 @@ python3 "<이 스킬 폴더>/generator/companyctl.py" init --root <루트> --nam
 
 ### 4. 직원 등록 (부서마다 한 번씩 물어본다)
 먼저 `python3 - <<'EOF'` 없이 `cat ~/.config/folder-bot/bots.json`으로 기존 봇 이름·폴더를 읽어 표로 보여 준다(토큰 없음, 읽어도 됨). 부서마다 세 가지 중 하나를 고르게 한다:
-- **기존 봇**: `companyctl employee add --root <루트> --dept <부서> --name <직원명> --bot <bots.json 이름>` — 채널 ID는 그 봇 폴더의 `.discord-state/access.json`에서 자동으로 읽는다(둘 이상이면 `--channel-id`).
+- **기존 봇**: `companyctl employee add --root <루트> --dept <부서> --name <직원명> --bot <bots.json 이름>` — 채널 ID는 그 봇 폴더의 `.discord-state/access.json`에서 자동으로 읽는다(둘 이상이면 `--channel-id`). folder-bot `--engine codex|agy` 봇은 폴더에 `.discord-state`가 없으므로 엔진이 브리지 인스턴스 `<bridge_dir>/.env.<봇>`의 `TUI_CHANNEL_ID`를 대신 읽는다(0.2.4+) — 손으로 .env를 열어 값을 옮기지 말 것.
 - **새 폴더 + 새 봇**: `companyctl employee add ... --folder <새 폴더> --engine claude|codex|agy` → 그 폴더에서 folder-bot의 **configure-bot** 스킬로 봇을 만든 뒤(포탈 수동 단계 포함) `companyctl employee add ... --bot <새 봇 이름> --replace`로 갱신.
 - **folder-bot 밖에서 도는 봇**(LaunchAgent로 직접 띄운 Claude 봇, codex-discord 브리지 봇): `companyctl employee add ... --folder <봇 폴더> --engine claude|codex|agy --session <tmux 세션> [--channel-id <ID>]` — 총괄은 스레드 없이 그 세션에 직접 보낸다(`agentlayer status`의 SESSION 열 이름).
   - **하네스 설치기의 공용 브리지**(`codex-live`, Gemini)를 그대로 직원으로 쓸 때는 값을 손으로 옮기지 말고 `companyctl employee add ... --env-file <브리지 폴더>/.env`(코덱스) 또는 `.env.gemini`(제미나이) — `TUI_PANE`→세션, `TUI_CHANNEL_ID`→채널, `CODEX_WORKDIR`→폴더, `ENGINE`→엔진을 읽는다. 라이브 TUI 모드가 아니면(TUI_PANE 없음) 거부한다: 총괄이 보낼 tmux pane이 없어서다. 설치기 기본 구성은 코덱스만 TUI이므로 제미나이는 `.env.gemini`에 `TUI_PANE=gemini-live:0.0`·`TUI_CHANNEL_ID=<제미나이 채널>`을 넣고 브리지 폴더에서 `bash scripts/install.sh`를 재실행(codex-discord v0.1.22+, 로그인 자동 기동 유닛 `gemini-tui` 등록)한 뒤 등록한다.
@@ -49,7 +51,7 @@ python3 "<이 스킬 폴더>/generator/companyctl.py" install --root <루트>
 ```
 출력을 그대로 보여 준다(템플릿·SESSION.md·총괄 블록·직원 블록).
 
-**회사 루트가 이미 폴더 봇이면 재시작한다** — `~/.config/folder-bot/bots.json`에서 `folder`가 회사 루트와 같은 봇을 찾아 그 `session`으로 `bot-restart <session>`을 실행한다(`~/.local/bin/bot-restart`). 돌고 있던 봇 세션은 방금 설치한 총괄 블록을 읽지 않은 상태라 재시작해야 총괄로 동작한다. "총괄 봇 재시작: <session>" 한 줄로 알린다. 해당 봇이 없으면 아래 6단계.
+**회사 루트가 이미 폴더 봇이면 install이 스스로 재시작한다(0.2.4+)** — 엔진이 `~/.config/folder-bot/bots.json`에서 `folder`가 회사 루트와 같은 봇을 찾아, 총괄 블록이 새로 깔리거나 바뀐 경우에만 `~/.local/bin/bot-restart <session>`을 부르고 출력 끝에 `총괄 봇 재시작: <session> — 재시작 예약됨 …` 한 줄을 낸다(블록이 이미 최신이면 봇을 끊지 않는다). 에이전트가 따로 bot-restart를 실행하지 않는다. 그 줄이 `WARN`이면(bot-restart 없음·실패) 안내대로 수동 `bot-restart <session>`. `--no-restart`로 끌 수 있다. 재시작은 tmux pane 교체(respawn)라 systemd 유닛의 Active 시각·tmux 세션 생성 시각은 그대로다 — 됐는지는 pane 안 claude 프로세스(pid·세션 ID)가 바뀌었는지로 본다. 해당 봇이 없으면(출력에 재시작 줄 없음) 아래 6단계.
 
 ### 6. 총괄 봇 (아직 봇이 아닐 때 · 수동 단계 포함)
 회사 루트에서 folder-bot의 **configure-bot** 스킬을 실행한다("이 폴더를 디스코드 봇으로 만들어줘", 봇 이름 예: `company`, 세션 `company-bot`). 디스코드 포탈·토큰·초대·페어링은 그 스킬의 안내를 따른다. 봇을 먼저 만들고 회사를 나중에 만들어도 된다(5단계가 재시작한다). 직원 채널들은 한 카테고리에 모아 두는 것을 권한다(채널 ID는 바뀌지 않으므로 이동은 자유).

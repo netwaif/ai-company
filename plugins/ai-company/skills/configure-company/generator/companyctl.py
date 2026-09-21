@@ -150,6 +150,48 @@ def channel_id_of(folder: Path) -> list:
         return []
 
 
+def bridge_channel_id(bot_name: str, b: dict) -> tuple:
+    """folder-bot --engine codex|agy 봇은 폴더에 .discord-state가 없다 — 채널은 브리지 인스턴스
+    <bridge_dir>/.env.<봇>의 TUI_CHANNEL_ID. (경로, 채널 ID)를 돌려주고 파일이 없으면 ID는 ""."""
+    p = Path(b.get("bridge_dir") or "~/codex-discord").expanduser() / f".env.{bot_name}"
+    if not p.is_file():
+        return p, ""
+    return p, parse_env_file(p).get("TUI_CHANNEL_ID", "")
+
+
+def manager_bot_of(root: Path) -> tuple:
+    """bots.json에서 folder가 회사 루트와 같은 봇(총괄 봇) → (이름, 항목). 없으면 (None, None)."""
+    for name, b in read_bots().items():
+        f = b.get("folder")
+        if f and Path(f).expanduser().resolve() == root:
+            return name, b
+    return None, None
+
+
+def restart_manager_bot(root: Path) -> list:
+    """회사 루트가 이미 폴더 봇이면 bot-restart <세션>으로 재시작한다 — 돌고 있던 봇은 방금 설치한
+    총괄 블록을 읽지 않은 상태라서다. bot-restart는 tmux pane 교체(respawn)라 systemd 유닛·tmux 세션
+    생성 시각은 그대로다(재시작 확인은 pane 안 프로세스·세션 ID로). 출력 줄 목록을 돌려준다."""
+    name, b = manager_bot_of(root)
+    if not b:
+        return []
+    sess = b.get("session") or f"{name}-bot"
+    exe = str(Path.home() / ".local" / "bin" / "bot-restart")  # folder-bot이 설치하는 자리
+    if not Path(exe).is_file():
+        exe = shutil.which("bot-restart") or exe
+    if not Path(exe).is_file():
+        return [f"WARN 총괄 봇 {name}(세션 {sess})이 총괄 블록을 아직 못 읽었는데 bot-restart가 없어 재시작 못 함 — "
+                f"folder-bot 플러그인을 갱신한 뒤 수동으로: bot-restart {sess}"]
+    try:
+        r = subprocess.run([exe, sess], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as ex:
+        return [f"WARN 총괄 봇 재시작 실패({sess}): {ex} — 수동으로: bot-restart {sess}"]
+    out = " ".join((r.stdout.strip() or r.stderr.strip()).splitlines())
+    if r.returncode != 0:
+        return [f"WARN 총괄 봇 재시작 실패({sess}, exit {r.returncode}): {out} — 수동으로: bot-restart {sess}"]
+    return [f"총괄 봇 재시작: {sess}" + (f" — {out}" if out else "")]
+
+
 def tool_of_engine(engine: str) -> str:
     return {"claude": "claude", "codex": "codex", "agy": "gemini", "gemini": "gemini"}.get(engine, engine)
 
@@ -230,8 +272,12 @@ def cmd_employee(a) -> None:
             die("회사 루트는 직원으로 등록할 수 없습니다(총괄 폴더)")
         ids = channel_id_of(folder)
         cid = a.channel_id or (ids[0] if len(ids) == 1 else "")
+        env_path = None
+        if not cid and not ids and b.get("engine") in ("codex", "agy", "gemini"):
+            env_path, cid = bridge_channel_id(a.bot, b)
         if not cid:
-            die(f"채널 ID를 정할 수 없습니다(access.json groups: {ids}) — --channel-id <ID>로 지정")
+            hint = f"브리지 {env_path}에 TUI_CHANNEL_ID 없음" if env_path else f"access.json groups: {ids}"
+            die(f"채널 ID를 정할 수 없습니다({hint}) — --channel-id <ID>로 지정")
         e.update(tool=tool_of_engine(b.get("engine", "claude")), mode="bot", session=b.get("session", ""),
                  folder=str(folder), bot=a.bot, channel_id=cid)
     elif a.folder:
@@ -329,6 +375,7 @@ def cmd_install(a) -> None:
     body = render((ASSETS / "company-block.md").read_text(encoding="utf-8"),
                   {"{ROOT}": str(root), "{INBOX}": inbox, "{NAME}": r["name"]})
     msg = install_block(root / "CLAUDE.md", body)
+    manager_changed = bool(msg)
     if msg:
         done.append(msg)
     groups = {}
@@ -358,6 +405,14 @@ def cmd_install(a) -> None:
         msg = install_block(folder / fname, eb, header)
         if msg:
             done.append(msg)
+    # 총괄 블록이 새로 깔리거나 바뀌었고 회사 루트가 이미 폴더 봇이면 재시작 — 블록이 이미 최신이면
+    # 봇을 괜히 끊지 않는다(멱등). 직원 블록만 바뀐 경우 총괄은 명부를 매 턴 읽으므로 재시작 불필요.
+    if manager_changed:
+        if getattr(a, "no_restart", False):
+            if manager_bot_of(root)[0]:
+                done.append("총괄 봇 재시작 생략(--no-restart) — 봇이 총괄 블록을 읽으려면 bot-restart <세션> 필요")
+        else:
+            done.extend(restart_manager_bot(root))
     print("\n".join(done) if done else "변경 없음(이미 설치됨)")
 
 
@@ -594,8 +649,9 @@ def main() -> None:
     ep.add_argument("--replace", action="store_true")
     ep.set_defaults(fn=cmd_employee)
 
-    inp = sub.add_parser("install", help="폴더·템플릿·지침 블록 설치")
+    inp = sub.add_parser("install", help="폴더·템플릿·지침 블록 설치(회사 루트가 폴더 봇이면 총괄 봇 재시작까지)")
     inp.add_argument("--root", default=".")
+    inp.add_argument("--no-restart", action="store_true", help="총괄 블록이 바뀌어도 bot-restart를 부르지 않음")
     inp.set_defaults(fn=cmd_install)
 
     rp = sub.add_parser("remove", help="지침 블록 제거(기록 보존)")
