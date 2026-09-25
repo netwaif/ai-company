@@ -253,8 +253,9 @@ def cmd_employee(a) -> None:
         die("--dept 필요")
     if a.dept not in r["departments"]:
         die(f"부서 {a.dept}이 명부에 없습니다 — `companyctl dept add --name {a.dept}` 먼저")
-    if sum(map(bool, [a.bot, a.folder, a.on_demand])) != 1:
-        die("--bot <이름> | --folder <폴더> | --on-demand 중 하나만 지정")
+    remote_name = getattr(a, "remote", None)
+    if sum(map(bool, [a.bot, a.folder, a.on_demand, remote_name])) != 1:
+        die("--bot <이름> | --folder <폴더> | --on-demand | --remote <원격이름> 중 하나만 지정")
     exists = [e for e in r["employees"] if e["name"] == a.name]
     if exists and not a.replace:
         die(f"직원 {a.name}이 이미 있습니다 (--replace로 교체)")
@@ -280,6 +281,13 @@ def cmd_employee(a) -> None:
             die(f"채널 ID를 정할 수 없습니다({hint}) — --channel-id <ID>로 지정")
         e.update(tool=tool_of_engine(b.get("engine", "claude")), mode="bot", session=b.get("session", ""),
                  folder=str(folder), bot=a.bot, channel_id=cid)
+    elif remote_name:
+        # agentlayer remote add로 등록된 원격 직원(호스팅어 Hermes 등). 총괄은 스레드 없이 그 이름으로 task assign·send를 보내고,
+        # 보고는 task watch의 폴링이 같은 inbox 형식으로 만든다. 폴더·봇·채널은 없다.
+        remotes = agentlayer_remotes()
+        if remote_name not in remotes:
+            die(f"agentlayer에 원격 {remote_name}이 없습니다 — 먼저 `agentlayer remote add {remote_name} …`(agentlayer 1.9.0+)")
+        e.update(tool=remotes[remote_name] or "hermes", mode="remote", session=remote_name, folder="", bot="", channel_id="")
     elif a.folder:
         folder = Path(a.folder).expanduser().resolve()
         if folder == root:
@@ -486,6 +494,32 @@ def task_rows() -> list:
         return []
 
 
+def agentlayer_remotes() -> dict:
+    """`agentlayer remote list --json` → {이름: kind}. agentlayer가 없거나(1.9.0 미만) 응답이 JSON이 아니면 빈 dict."""
+    exe = which("agentlayer")
+    if not exe:
+        return {}
+    try:
+        out = subprocess.run([exe, "remote", "list", "--json"], capture_output=True, text=True, timeout=10).stdout
+        rows = json.loads(out or "[]")
+        return {r.get("name", ""): r.get("kind", "") for r in rows if isinstance(r, dict)} if isinstance(rows, list) else {}
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return {}
+
+
+def agentlayer_remote_check(name: str) -> tuple:
+    """(ok, 한 줄 요약). `agentlayer remote check <이름>`의 종료 코드와 출력 첫 줄."""
+    exe = which("agentlayer")
+    if not exe:
+        return (False, "agentlayer 없음")
+    try:
+        p = subprocess.run([exe, "remote", "check", name], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as ex:
+        return (False, f"remote check 실행 실패: {ex}")
+    first = (p.stdout.strip() or p.stderr.strip()).splitlines()
+    return (p.returncode == 0, first[0].strip() if first else "")
+
+
 def _strip_yaml_comment(line: str) -> str:
     """yaml 줄 주석 제거: 줄 선두(공백 제외) `#`는 줄 전체를 지우고, 그 외 ` #`(공백+해시) 이후는 잘라낸다."""
     if line.lstrip().startswith("#"):
@@ -591,6 +625,10 @@ def cmd_doctor(a) -> None:
             if e["mode"] == "on-demand":
                 ok(f"{d}/{e['name']}: 호출형")
                 continue
+            if e["mode"] == "remote":
+                good, line = agentlayer_remote_check(e["session"])
+                (ok if good else bad)(f"{d}/{e['name']} [{e['tool']}/원격 {e['session']}] remote check: {line or ('OK' if good else 'FAIL')}")
+                continue
             if e["mode"] == "folder":
                 warn(f"{d}/{e['name']}: 폴더만 있음({e['folder']}) — configure-bot으로 봇 연결 뒤 `employee add --bot`로 갱신")
                 continue
@@ -643,6 +681,7 @@ def main() -> None:
     ep.add_argument("--folder", help="새 부서 폴더(봇은 나중에 configure-bot으로)")
     ep.add_argument("--engine", choices=["claude", "codex", "agy", "gemini"], default=None, help="기본 claude(--env-file이면 그 ENGINE, 없으면 codex)")
     ep.add_argument("--on-demand", action="store_true", help="호출형(폴더·봇 없음)")
+    ep.add_argument("--remote", help="agentlayer remote add로 등록한 원격 직원 이름(호스팅어 Hermes 등) — 폴더·봇 없이 총괄이 그 이름으로 task assign·send")
     ep.add_argument("--session", help="--folder와 함께: folder-bot 밖에서 도는 봇(LaunchAgent·브리지)의 tmux 세션 — 외부 봇 등록")
     ep.add_argument("--env-file", help="codex-discord 브리지 .env(.gemini) 경로 — TUI_PANE→세션, TUI_CHANNEL_ID→채널, CODEX_WORKDIR→폴더, ENGINE→엔진을 읽어 외부 봇으로 등록(라이브 TUI 모드 필수)")
     ep.add_argument("--channel-id")

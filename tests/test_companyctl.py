@@ -644,3 +644,51 @@ def test_install_warns_when_bot_restart_missing(env, tmp_path):
     env = {**env, "PATH": str(shim)}  # 이 Mac의 진짜 ~/.local/bin/bot-restart가 잡히지 않게
     r = run(env, "install", "--root", str(root))
     assert r.returncode == 0 and "WARN" in r.stdout and "bot-restart company-bot" in r.stdout
+
+
+def _remote_shim(env, tmp_path, names=("hermes-qa",), check_ok=True):
+    """agentlayer remote list/check를 흉내 내는 가짜 — 등록된 원격 이름 목록과 check 성패."""
+    shim = tmp_path / "shim-remote"
+    shim.mkdir(exist_ok=True)
+    rows = ",".join(f'{{"name":"{n}","kind":"hermes","ssh":"hostinger","profile":"tech-qa"}}' for n in names)
+    (shim / "agentlayer").write_text(
+        "#!/bin/sh\ncase \"$1 $2\" in\n"
+        f"  'remote list') echo '[{rows}]';;\n"
+        f"  'remote check') echo 'Hermes Agent v0.20.0'; exit {0 if check_ok else 1};;\n"
+        "  'task list') echo '[]';;\n"
+        "  *) case \"$1\" in version) echo 'agentlayer v1.9.0 (commit abc, 2026-09-25)';; *) echo \"fake $*\";; esac;;\n"
+        "esac\n")
+    (shim / "agentlayer").chmod(0o755)
+    env["PATH"] = f"{shim}:{env['PATH']}"
+
+
+def test_employee_add_remote_registers_mode_remote(env, tmp_path):
+    """원격 직원(agentlayer remote add로 등록된 이름)은 폴더·봇 없이 mode=remote, session=원격 이름으로 명부에 든다."""
+    root = _init(env, tmp_path)
+    _remote_shim(env, tmp_path)
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "기술검증팀", "--name", "원격 QA", "--remote", "hermes-qa")
+    assert r.returncode == 0, r.stderr
+    e = json.loads((root / "직원명부.json").read_text())["employees"][0]
+    assert e["mode"] == "remote" and e["session"] == "hermes-qa" and e["tool"] == "hermes" and e["folder"] == "" and e["bot"] == ""
+    # 미등록 이름은 거부(먼저 agentlayer remote add)
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "기술검증팀", "--name", "없는", "--remote", "ghost")
+    assert r.returncode != 0 and "agentlayer remote add" in r.stderr
+    # 다른 모드와 동시 지정 거부
+    r = run(env, "employee", "add", "--root", str(root), "--dept", "기술검증팀", "--name", "겹침", "--remote", "hermes-qa", "--on-demand")
+    assert r.returncode != 0
+
+
+def test_install_and_doctor_with_remote_employee(env, tmp_path):
+    """install은 원격 직원에 지침 블록을 깔지 않고(폴더 없음), doctor는 agentlayer remote check 결과를 한 줄로 보인다."""
+    root = _init(env, tmp_path)
+    _remote_shim(env, tmp_path)
+    assert run(env, "employee", "add", "--root", str(root), "--dept", "기술검증팀", "--name", "원격 QA", "--remote", "hermes-qa").returncode == 0
+    r = run(env, "install", "--root", str(root), "--no-restart")
+    assert r.returncode == 0, r.stderr
+    block = (root / "CLAUDE.md").read_text()
+    assert "원격 직원" in block and "MESSAGE" in block and "상시" in block
+    r = run(env, "doctor", "--root", str(root))
+    assert "기술검증팀/원격 QA" in r.stdout and "remote check" in r.stdout and "OK   기술검증팀/원격 QA" in r.stdout, r.stdout
+    _remote_shim(env, tmp_path, check_ok=False)
+    r = run(env, "doctor", "--root", str(root))
+    assert "FAIL 기술검증팀/원격 QA" in r.stdout

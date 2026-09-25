@@ -43,6 +43,7 @@ python3 "<이 스킬 폴더>/generator/companyctl.py" init --root <루트> --nam
 
 **Codex·Gemini 직원의 두 경로**: 직원마다 봇을 따로 두려면 folder-bot **configure-bot**의 `--engine codex|agy`로 봇을 만들고 `--bot`으로 등록한다(전용 채널·자동 기동·라이브 TUI까지 folder-bot이 만든다 — 권장). 이미 하네스 브리지가 돌고 있으면 위 `--env-file`로 그 세션을 그대로 직원으로 쓴다(채널은 기존 코덱스·제미나이 채널). 어느 쪽이든 총괄 절차는 같다(스레드 없이 `task assign <ID> <세션>` → `send <세션> - < 업무요청`).
 - **호출형**: `companyctl employee add ... --on-demand` — 폴더·봇 없음, 총괄이 필요할 때 `claude -p`로 처리.
+- **원격 직원**(호스팅어 Hermes 등, agentlayer 1.9.0+): 먼저 `agentlayer remote add <이름> --kind hermes --ssh <호스트> --profile <프로필> --exec "<원격 명령 접두어>" --workspace-root <원격 절대경로>`로 등록·점검한 뒤 `companyctl employee add ... --remote <이름>`. 폴더·봇·채널 없음. 총괄은 스레드 없이 `task assign <ID> <이름>` → `send <이름> - < 업무요청`이고, 보고는 `task watch`의 폴링이 같은 inbox 형식으로 만든다(감시 상시). 산출물은 완료 뒤 `결과물/<ID>/remote/`에 회수된다. 직원이 먼저 보내는 편지는 로컬 직원 `agentlayer task message`, 원격은 예약 담당자(`imac-manager`) 카드 → 총괄에 `to: MESSAGE`.
 경영기획실(총괄)은 직원으로 등록하지 않는다 — 회사 루트 자체가 총괄 봇 폴더다.
 
 ### 5. 설치
@@ -66,7 +67,7 @@ FAIL이 없으면 무해한 사슬 한 번: 총괄 채널(또는 회사 루트�
 `companyctl employee add|remove`, `companyctl dept add|remove` 뒤 반드시 `companyctl install`(블록 갱신). 직원 제거는 명부에서만 빼며 그 폴더의 블록은 `install`이 다시 돌 때 유지된다 — 블록까지 걷으려면 먼저 `companyctl remove`, 명부 수정, `install`.
 
 ## 점검
-`companyctl doctor --root <루트>` — 읽기 전용. agentlayer 버전·도구·명부·총괄 블록·수신함·직원별 폴더/블록/등록/채널·낡은 업무(`stale`·`gone`)·parents 끊긴 참조(WARN)·활성 업무 수.
+`companyctl doctor --root <루트>` — 읽기 전용. agentlayer 버전·도구·명부·총괄 블록·수신함·직원별 폴더/블록/등록/채널·원격 직원은 `agentlayer remote check`(ssh 왕복·프로필)·낡은 업무(`stale`·`gone`)·parents 끊긴 참조(WARN)·활성 업무 수.
 
 ## 제거
 `companyctl remove --root <루트>` — 총괄·직원 지침 블록만 걷어낸다. 직원명부·SESSION.md·업무요청·결과물·tasks·runtime은 보존(삭제는 사용자 몫). 총괄 봇 자체는 folder-bot의 제거 절차.
