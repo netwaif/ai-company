@@ -6,7 +6,7 @@
     {
       "name": "ai-company",
       "description": "\"AI 회사 만들어줘\" — 회사 폴더·공동 규칙·직원명부·총괄 절차를 결정적 엔진(companyctl)이 멱등 설치. 직원은 기존 folder-bot 봇 등록 / 새 폴더 신설 / 호출형 세 모드. 수동은 디스코드 포탈(총괄 봇)뿐.",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "source": "./plugins/ai-company",
       "author": { "name": "netwaif" }
     }

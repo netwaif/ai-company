@@ -686,7 +686,7 @@ def test_install_and_doctor_with_remote_employee(env, tmp_path):
     r = run(env, "install", "--root", str(root), "--no-restart")
     assert r.returncode == 0, r.stderr
     block = (root / "CLAUDE.md").read_text()
-    assert "원격 직원" in block and "MESSAGE" in block and "상시" in block
+    assert "원격 직원" in block and "MESSAGE" in block and "상시" in block and "task reply" in block
     r = run(env, "doctor", "--root", str(root))
     assert "기술검증팀/원격 QA" in r.stdout and "remote check" in r.stdout and "OK   기술검증팀/원격 QA" in r.stdout, r.stdout
     _remote_shim(env, tmp_path, check_ok=False)
